@@ -26,7 +26,7 @@ if (!process.env.MAILERSEND_API_KEY) {
 const mailersend = new MailerSend({
   apiKey: process.env.MAILERSEND_API_KEY || '',
 });
-const VERIFIED_SENDER = 'verified-email@yourdomain.com'; // Change to your verified sender
+const VERIFIED_SENDER = 'no-reply@ayurmitti.com'; // Change to your verified sender
 
 const renderOrderEmailHtml = (order = {}, storeName = 'Ayurmitti') => {
   return `<div>Order confirmation for ${order.customer || 'Customer'}</div>`;

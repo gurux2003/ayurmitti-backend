@@ -1,23 +1,21 @@
 import express from "express";
 import dotenv from "dotenv";
-import crypto from "crypto";
 import Razorpay from "razorpay";
+import crypto from "crypto";
 import pkg from "mailersend";
 
-const { MailerSend, EmailParams, Sender, Recipient } = pkg;
-
 dotenv.config();
+
+const { MailerSend, EmailParams, Sender, Recipient } = pkg;
 
 const app = express();
 const port = process.env.PORT || 8080;
 
 app.use(express.json());
 
-// ================= CORS =================
-const allowedOrigin = process.env.CORS_ORIGIN || "*";
-
+// ================= CORS (ALLOW ALL FOR TESTING) =================
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+  res.setHeader("Access-Control-Allow-Origin", "*"); // ✅ allow all
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
@@ -31,7 +29,7 @@ const mailerSend = new MailerSend({
 });
 
 const sentFrom = new Sender(
-  process.env.MAIL_FROM,
+  process.env.MAIL_FROM || "noreply@ayurmitti.com",
   "Ayurmitti"
 );
 
@@ -41,13 +39,10 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET
 });
 
-// ================= ROUTES =================
-
-// Health
+// ================= HEALTH =================
 app.get("/api/health", (req, res) => {
-  res.json({ status: "OK 🚀" });
+  res.json({ status: "OK", message: "Backend running 🚀" });
 });
-
 
 // ================= CREATE ORDER =================
 app.post("/api/create-order", async (req, res) => {
@@ -57,24 +52,19 @@ app.post("/api/create-order", async (req, res) => {
     const options = {
       amount: amount * 100, // ₹ → paise
       currency: "INR",
-      receipt: "order_" + Date.now()
+      receipt: "receipt_" + Date.now()
     };
 
     const order = await razorpay.orders.create(options);
 
-    res.json({
-      success: true,
-      order
-    });
-
+    res.json(order);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ error: "Order creation failed" });
   }
 });
 
-
-// ================= VERIFY PAYMENT + EMAIL =================
+// ================= VERIFY PAYMENT + SEND EMAIL =================
 app.post("/api/verify-payment", async (req, res) => {
   try {
     const {
@@ -84,22 +74,22 @@ app.post("/api/verify-payment", async (req, res) => {
       order
     } = req.body;
 
-    // 🔐 VERIFY SIGNATURE
+    // 🔐 Signature verification
     const body = razorpay_order_id + "|" + razorpay_payment_id;
 
     const expectedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-      .update(body)
+      .update(body.toString())
       .digest("hex");
 
     if (expectedSignature !== razorpay_signature) {
       return res.status(400).json({
         success: false,
-        message: "Payment verification failed ❌"
+        message: "Invalid signature ❌"
       });
     }
 
-    console.log("✅ Payment Verified");
+    console.log("✅ Payment verified");
 
     // ================= SEND EMAIL =================
     const recipients = [
@@ -109,29 +99,31 @@ app.post("/api/verify-payment", async (req, res) => {
     const emailParams = new EmailParams()
       .setFrom(sentFrom)
       .setTo(recipients)
-      .setSubject("Order Confirmed 🎉")
+      .setSubject("Order Confirmation - Ayurmitti")
       .setHtml(`
-        <h2>Payment Successful ✅</h2>
-        <p><strong>Order ID:</strong> ${order.id}</p>
-        <p><strong>Amount Paid:</strong> ₹${order.amount}</p>
-        <p>Thank you for shopping with us 🙏</p>
+        <h2>Order Confirmed ✅</h2>
+        <p><b>Order ID:</b> ${order.id}</p>
+        <p><b>Amount:</b> ₹${order.amount}</p>
+        <p>Thank you for shopping with us ❤️</p>
       `);
 
     await mailerSend.email.send(emailParams);
 
-    console.log("📧 Email Sent");
+    console.log("📧 Email sent");
 
     res.json({
       success: true,
-      message: "Payment verified & email sent"
+      message: "Payment verified & email sent ✅"
     });
 
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({
+      success: false,
+      message: "Verification failed"
+    });
   }
 });
-
 
 // ================= START =================
 app.listen(port, () => {

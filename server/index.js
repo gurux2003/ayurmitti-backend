@@ -28,7 +28,7 @@ const mailerSend = new MailerSend({
 
 // Sender email (must be verified in MailerSend)
 const sentFrom = new Sender(
-  process.env.MAIL_FROM || "no-reply@yourdomain.com",
+  process.env.MAIL_FROM || "noreply@ayurmitti.com",
   "Ayurmitti"
 );
 

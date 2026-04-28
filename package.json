@@ -1,16 +1,15 @@
 {
-  "name": "ayurmitti-backend",
+  "name": "backend",
   "version": "1.0.0",
-  "description": "Backend for Ayurmitti (MailerSend + Razorpay)",
   "main": "server/index.js",
-  "type": "module",
+  "type": "commonjs",
   "scripts": {
     "start": "node server/index.js"
   },
   "dependencies": {
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "mailersend": "^1.4.0",
-    "razorpay": "^2.9.4"
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "mailersend": "^2.8.0",
+    "razorpay": "^2.9.6"
   }
 }

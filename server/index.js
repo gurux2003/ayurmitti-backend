@@ -1,12 +1,12 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import pkg from 'mailersend';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
 
-// ✅ FIXED MailerSend import (works in Railway / Node 22)
-import pkg from 'mailersend';
-
 dotenv.config();
+
+const { MailerSend, EmailParams, Sender, Recipient } = pkg;
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -25,19 +25,13 @@ app.use((req, res, next) => {
   next();
 });
 
-// ================= MAILERSEND FIX =================
+// ================= MAILERSEND =================
+const mailerSend = new MailerSend({
+  api_key: process.env.MAILERSEND_API_KEY
+});
 
-// 👇 handle different export styles safely
-const MailerSendClass = pkg.default || pkg;
-const { EmailParams, Sender, Recipient } = pkg;
-
-// 👇 correct initialization (NO constructor error)
-const mailerSend = new MailerSendClass();
-mailerSend.setApiKey(process.env.MAILERSEND_API_KEY);
-
-// Sender (must be verified)
 const sentFrom = new Sender(
-  process.env.MAIL_FROM || "noreply@ayurmitti.com",
+  process.env.MAIL_FROM || "noreply@yourdomain.com",
   "Ayurmitti"
 );
 
@@ -54,23 +48,30 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'Backend running 🚀' });
 });
 
-// ================= CREATE ORDER =================
+// ================= CREATE ORDER (RAZORPAY) =================
 app.post('/api/create-order', async (req, res) => {
   try {
     const { amount } = req.body;
 
+    if (!amount) {
+      return res.status(400).json({ success: false, message: 'Amount required' });
+    }
+
     const options = {
-      amount: amount * 100,
+      amount: amount * 100, // ₹ to paise
       currency: "INR",
-      receipt: "receipt_" + Date.now()
+      receipt: "order_" + Date.now()
     };
 
     const order = await razorpay.orders.create(options);
 
-    res.json({ success: true, order });
+    res.json({
+      success: true,
+      order
+    });
 
   } catch (err) {
-    console.error("❌ Razorpay Error:", err);
+    console.error("❌ Razorpay Order Error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -87,19 +88,19 @@ app.post('/api/verify-payment', (req, res) => {
     const body = razorpay_order_id + "|" + razorpay_payment_id;
 
     const expectedSignature = crypto
-      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
       .update(body)
-      .digest('hex');
+      .digest("hex");
 
     if (expectedSignature === razorpay_signature) {
       return res.json({ success: true, message: "Payment verified ✅" });
+    } else {
+      return res.status(400).json({ success: false, message: "Invalid signature ❌" });
     }
-
-    return res.status(400).json({ success: false, message: "Invalid signature ❌" });
 
   } catch (err) {
     console.error("❌ Verify Error:", err);
-    res.status(500).json({ success: false });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -109,7 +110,10 @@ app.post('/api/send-order-confirmation', async (req, res) => {
     const { order, storeName } = req.body;
 
     if (!order || !order.email) {
-      return res.status(400).json({ success: false, message: "Missing order data" });
+      return res.status(400).json({
+        success: false,
+        message: 'Missing order data'
+      });
     }
 
     const recipients = [
@@ -122,13 +126,11 @@ app.post('/api/send-order-confirmation', async (req, res) => {
       .setSubject(`${storeName || 'Ayurmitti'} Order Confirmation`)
       .setHtml(`
         <h2>Order Confirmed ✅</h2>
-        <p>Order ID: ${order.id}</p>
-        <p>Total: ₹${order.amount}</p>
+        <p><strong>Order ID:</strong> ${order.id}</p>
+        <p><strong>Total:</strong> ₹${order.amount}</p>
       `);
 
     await mailerSend.email.send(emailParams);
-
-    console.log("✅ Order Email Sent");
 
     res.json({ success: true });
 
@@ -144,7 +146,10 @@ app.post('/api/send-shipping-update', async (req, res) => {
     const { order, storeName } = req.body;
 
     if (!order || !order.email || !order.trackingId) {
-      return res.status(400).json({ success: false, message: "Missing tracking info" });
+      return res.status(400).json({
+        success: false,
+        message: 'Missing tracking info'
+      });
     }
 
     const recipients = [
@@ -157,18 +162,16 @@ app.post('/api/send-shipping-update', async (req, res) => {
       .setSubject(`${storeName || 'Ayurmitti'} Shipping Update`)
       .setHtml(`
         <h2>Your Order Shipped 🚚</h2>
-        <p>Order ID: ${order.id}</p>
-        <p>Tracking ID: ${order.trackingId}</p>
+        <p><strong>Order ID:</strong> ${order.id}</p>
+        <p><strong>Tracking ID:</strong> ${order.trackingId}</p>
         ${
           order.trackingUrl
-            ? `<a href="${order.trackingUrl}">Track Order</a>`
+            ? `<p><a href="${order.trackingUrl}">Track your order</a></p>`
             : ''
         }
       `);
 
     await mailerSend.email.send(emailParams);
-
-    console.log("✅ Shipping Email Sent");
 
     res.json({ success: true });
 
@@ -180,14 +183,14 @@ app.post('/api/send-shipping-update', async (req, res) => {
 
 // ================= TEST ROUTES =================
 app.get('/api/send-order-confirmation', (req, res) => {
-  res.send("Use POST method");
+  res.send("❌ Use POST method");
 });
 
 app.get('/api/send-shipping-update', (req, res) => {
-  res.send("Use POST method");
+  res.send("❌ Use POST method");
 });
 
-// ================= START SERVER =================
+// ================= START =================
 app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
 });

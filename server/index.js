@@ -8,16 +8,24 @@ const app = express();
 const port = process.env.PORT || 8080;
 
 // ================= CORS =================
-const allowedOrigin = process.env.CORS_ORIGIN || '*';
+const allowedOrigins = (process.env.CORS_ORIGIN || '*')
+  .split(',')
+  .map(o => o.trim());
 
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  const origin = req.headers.origin;
+
+  if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+  }
+
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
+    return res.sendStatus(204);
   }
+
   next();
 });
 
@@ -27,10 +35,19 @@ app.use(express.json());
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT) || 587,
-  secure: process.env.SMTP_SECURE === 'true',
+  secure: String(process.env.SMTP_SECURE).toLowerCase() === 'true',
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS
+  }
+});
+
+// Optional: verify SMTP on start (helps debugging)
+transporter.verify((err) => {
+  if (err) {
+    console.error("❌ SMTP Error:", err.message);
+  } else {
+    console.log("✅ SMTP Ready");
   }
 });
 
@@ -47,16 +64,22 @@ app.post('/api/send-order-confirmation', async (req, res) => {
     const { order, storeName } = req.body;
 
     if (!order || !order.email) {
-      return res.status(400).json({ success: false, message: 'Missing order data' });
+      return res.status(400).json({
+        success: false,
+        message: 'Missing order or email'
+      });
     }
 
     const mailOptions = {
-      from: process.env.SMTP_FROM,
+      from: process.env.SMTP_FROM || process.env.SMTP_USER,
       to: order.email,
-      subject: `${storeName || 'Ayurmitti'} Order Confirmation`,
-      html: `<h2>Order Confirmed</h2>
-             <p>Order ID: ${order.id}</p>
-             <p>Total: ₹${order.amount}</p>`
+      subject: `${storeName || 'Ayurmitti'} Order Confirmation - ${order.id}`,
+      html: `
+        <h2>✅ Order Confirmed</h2>
+        <p><strong>Order ID:</strong> ${order.id}</p>
+        <p><strong>Total:</strong> ₹${order.amount}</p>
+        <p>Thank you for shopping with us 🙏</p>
+      `
     };
 
     const info = await transporter.sendMail(mailOptions);
@@ -84,17 +107,19 @@ app.post('/api/send-shipping-update', async (req, res) => {
     }
 
     const mailOptions = {
-      from: process.env.SMTP_FROM,
+      from: process.env.SMTP_FROM || process.env.SMTP_USER,
       to: order.email,
-      subject: `${storeName || 'Ayurmitti'} Shipping Update`,
-      html: `<h2>Your Order Shipped 🚚</h2>
-             <p>Order ID: ${order.id}</p>
-             <p>Tracking ID: ${order.trackingId}</p>
-             ${
-               order.trackingUrl
-                 ? `<a href="${order.trackingUrl}">Track Order</a>`
-                 : ''
-             }`
+      subject: `${storeName || 'Ayurmitti'} Shipping Update - ${order.id}`,
+      html: `
+        <h2>🚚 Your Order Shipped</h2>
+        <p><strong>Order ID:</strong> ${order.id}</p>
+        <p><strong>Tracking ID:</strong> ${order.trackingId}</p>
+        ${
+          order.trackingUrl
+            ? `<p><a href="${order.trackingUrl}" target="_blank">Track your order</a></p>`
+            : ''
+        }
+      `
     };
 
     const info = await transporter.sendMail(mailOptions);
@@ -109,18 +134,16 @@ app.post('/api/send-shipping-update', async (req, res) => {
   }
 });
 
-// ================= TEST ROUTES (FOR BROWSER) =================
-
-// 👇 Now this will work in browser
+// ================= TEST ROUTES =================
 app.get('/api/send-shipping-update', (req, res) => {
-  res.send("❌ Use POST method to send shipping email");
+  res.send("❌ Use POST method");
 });
 
 app.get('/api/send-order-confirmation', (req, res) => {
-  res.send("❌ Use POST method to send order email");
+  res.send("❌ Use POST method");
 });
 
 // ================= START SERVER =================
-app.listen(port, () => {
+app.listen(port, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${port}`);
 });

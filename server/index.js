@@ -1,8 +1,11 @@
 import express from 'express';
 import dotenv from 'dotenv';
-import { MailerSend, EmailParams, Sender, Recipient } from 'mailersend';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
+
+// ✅ FIXED MailerSend import
+import pkg from 'mailersend';
+const { MailerSend, EmailParams, Sender, Recipient } = pkg;
 
 dotenv.config();
 
@@ -46,98 +49,18 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'Backend running 🚀' });
 });
 
-// ================= ORDER EMAIL =================
-app.post('/api/send-order-confirmation', async (req, res) => {
-  try {
-    const { order, storeName } = req.body;
-
-    if (!order || !order.email) {
-      return res.status(400).json({ success: false, message: 'Missing order data' });
-    }
-
-    const recipients = [
-      new Recipient(order.email, order.customer || "Customer")
-    ];
-
-    const emailParams = new EmailParams()
-      .setFrom(sentFrom)
-      .setTo(recipients)
-      .setSubject(`${storeName || 'Ayurmitti'} Order Confirmation`)
-      .setHtml(`
-        <h2>Order Confirmed ✅</h2>
-        <p><strong>Order ID:</strong> ${order.id}</p>
-        <p><strong>Total:</strong> ₹${order.amount}</p>
-      `);
-
-    await mailerSend.email.send(emailParams);
-
-    console.log("✅ Order Email Sent");
-    res.json({ success: true });
-
-  } catch (err) {
-    console.error("❌ Order Email Error:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// ================= SHIPPING EMAIL =================
-app.post('/api/send-shipping-update', async (req, res) => {
-  try {
-    const { order, storeName } = req.body;
-
-    if (!order || !order.email || !order.trackingId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing tracking info'
-      });
-    }
-
-    const recipients = [
-      new Recipient(order.email, order.customer || "Customer")
-    ];
-
-    const emailParams = new EmailParams()
-      .setFrom(sentFrom)
-      .setTo(recipients)
-      .setSubject(`${storeName || 'Ayurmitti'} Shipping Update`)
-      .setHtml(`
-        <h2>Your Order Shipped 🚚</h2>
-        <p><strong>Order ID:</strong> ${order.id}</p>
-        <p><strong>Tracking ID:</strong> ${order.trackingId}</p>
-        ${
-          order.trackingUrl
-            ? `<p><a href="${order.trackingUrl}">Track your order</a></p>`
-            : ''
-        }
-      `);
-
-    await mailerSend.email.send(emailParams);
-
-    console.log("✅ Shipping Email Sent");
-    res.json({ success: true });
-
-  } catch (err) {
-    console.error("❌ Shipping Email Error:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// ================= RAZORPAY CREATE ORDER =================
-app.post('/api/create-razorpay-order', async (req, res) => {
+// ================= CREATE ORDER (RAZORPAY) =================
+app.post('/api/create-order', async (req, res) => {
   try {
     const { amount } = req.body;
 
-    if (!amount) {
-      return res.status(400).json({ success: false, message: 'Amount required' });
-    }
-
-    const order = await razorpay.orders.create({
-      amount: amount * 100,
+    const options = {
+      amount: amount * 100, // paise
       currency: "INR",
       receipt: "receipt_" + Date.now()
-    });
+    };
 
-    console.log("✅ Razorpay Order Created:", order.id);
+    const order = await razorpay.orders.create(options);
 
     res.json({
       success: true,
@@ -150,8 +73,8 @@ app.post('/api/create-razorpay-order', async (req, res) => {
   }
 });
 
-// ================= RAZORPAY VERIFY =================
-app.post('/api/verify-payment', async (req, res) => {
+// ================= VERIFY PAYMENT =================
+app.post('/api/verify-payment', (req, res) => {
   try {
     const {
       razorpay_order_id,
@@ -163,37 +86,86 @@ app.post('/api/verify-payment', async (req, res) => {
 
     const expectedSignature = crypto
       .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-      .update(body)
+      .update(body.toString())
       .digest('hex');
 
     if (expectedSignature === razorpay_signature) {
-      console.log("✅ Payment Verified");
-      return res.json({ success: true });
+      return res.json({ success: true, message: "Payment verified ✅" });
     } else {
-      return res.status(400).json({ success: false, message: "Invalid signature" });
+      return res.status(400).json({ success: false, message: "Invalid signature ❌" });
     }
 
   } catch (err) {
     console.error("❌ Verify Error:", err);
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false });
+  }
+});
+
+// ================= ORDER EMAIL =================
+app.post('/api/send-order-confirmation', async (req, res) => {
+  try {
+    const { order, storeName } = req.body;
+
+    const recipients = [
+      new Recipient(order.email, order.customer || "Customer")
+    ];
+
+    const emailParams = new EmailParams()
+      .setFrom(sentFrom)
+      .setTo(recipients)
+      .setSubject(`${storeName || 'Ayurmitti'} Order Confirmation`)
+      .setHtml(`
+        <h2>Order Confirmed ✅</h2>
+        <p>Order ID: ${order.id}</p>
+        <p>Total: ₹${order.amount}</p>
+      `);
+
+    await mailerSend.email.send(emailParams);
+
+    res.json({ success: true });
+
+  } catch (err) {
+    console.error("❌ Order Email Error:", err);
+    res.status(500).json({ success: false });
+  }
+});
+
+// ================= SHIPPING EMAIL =================
+app.post('/api/send-shipping-update', async (req, res) => {
+  try {
+    const { order, storeName } = req.body;
+
+    const recipients = [
+      new Recipient(order.email, order.customer || "Customer")
+    ];
+
+    const emailParams = new EmailParams()
+      .setFrom(sentFrom)
+      .setTo(recipients)
+      .setSubject(`${storeName || 'Ayurmitti'} Shipping Update`)
+      .setHtml(`
+        <h2>Your Order Shipped 🚚</h2>
+        <p>Order ID: ${order.id}</p>
+        <p>Tracking ID: ${order.trackingId}</p>
+      `);
+
+    await mailerSend.email.send(emailParams);
+
+    res.json({ success: true });
+
+  } catch (err) {
+    console.error("❌ Shipping Email Error:", err);
+    res.status(500).json({ success: false });
   }
 });
 
 // ================= TEST ROUTES =================
 app.get('/api/send-order-confirmation', (req, res) => {
-  res.send("❌ Use POST method");
+  res.send("Use POST");
 });
 
 app.get('/api/send-shipping-update', (req, res) => {
-  res.send("❌ Use POST method");
-});
-
-app.get('/api/create-razorpay-order', (req, res) => {
-  res.send("❌ Use POST method");
-});
-
-app.get('/api/verify-payment', (req, res) => {
-  res.send("❌ Use POST method");
+  res.send("Use POST");
 });
 
 // ================= START =================

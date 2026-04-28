@@ -1,55 +1,36 @@
 import express from 'express';
-import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
+import { MailerSend, EmailParams, Sender, Recipient } from 'mailersend';
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 8080;
 
+app.use(express.json());
+
 // ================= CORS =================
-const allowedOrigins = (process.env.CORS_ORIGIN || '*')
-  .split(',')
-  .map(o => o.trim());
+const allowedOrigin = process.env.CORS_ORIGIN || '*';
 
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-
-  if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-  }
-
+  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
-  }
-
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 });
 
-app.use(express.json());
-
-// ================= MAIL SETUP =================
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT) || 587,
-  secure: String(process.env.SMTP_SECURE).toLowerCase() === 'true',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
+// ================= MAILERSEND SETUP =================
+const mailerSend = new MailerSend({
+  apiKey: process.env.MAILERSEND_API_KEY
 });
 
-// Optional: verify SMTP on start (helps debugging)
-transporter.verify((err) => {
-  if (err) {
-    console.error("❌ SMTP Error:", err.message);
-  } else {
-    console.log("✅ SMTP Ready");
-  }
-});
+// Sender email (must be verified in MailerSend)
+const sentFrom = new Sender(
+  process.env.MAIL_FROM || "no-reply@yourdomain.com",
+  "Ayurmitti"
+);
 
 // ================= ROUTES =================
 
@@ -66,27 +47,29 @@ app.post('/api/send-order-confirmation', async (req, res) => {
     if (!order || !order.email) {
       return res.status(400).json({
         success: false,
-        message: 'Missing order or email'
+        message: 'Missing order data'
       });
     }
 
-    const mailOptions = {
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
-      to: order.email,
-      subject: `${storeName || 'Ayurmitti'} Order Confirmation - ${order.id}`,
-      html: `
-        <h2>✅ Order Confirmed</h2>
+    const recipients = [
+      new Recipient(order.email, order.customer || "Customer")
+    ];
+
+    const emailParams = new EmailParams()
+      .setFrom(sentFrom)
+      .setTo(recipients)
+      .setSubject(`${storeName || 'Ayurmitti'} Order Confirmation`)
+      .setHtml(`
+        <h2>Order Confirmed ✅</h2>
         <p><strong>Order ID:</strong> ${order.id}</p>
         <p><strong>Total:</strong> ₹${order.amount}</p>
-        <p>Thank you for shopping with us 🙏</p>
-      `
-    };
+      `);
 
-    const info = await transporter.sendMail(mailOptions);
+    const response = await mailerSend.email.send(emailParams);
 
-    console.log("✅ Order Email Sent:", info.messageId);
+    console.log("✅ Order Email Sent:", response);
 
-    res.json({ success: true, messageId: info.messageId });
+    res.json({ success: true });
 
   } catch (err) {
     console.error("❌ Order Email Error:", err);
@@ -106,27 +89,30 @@ app.post('/api/send-shipping-update', async (req, res) => {
       });
     }
 
-    const mailOptions = {
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
-      to: order.email,
-      subject: `${storeName || 'Ayurmitti'} Shipping Update - ${order.id}`,
-      html: `
-        <h2>🚚 Your Order Shipped</h2>
+    const recipients = [
+      new Recipient(order.email, order.customer || "Customer")
+    ];
+
+    const emailParams = new EmailParams()
+      .setFrom(sentFrom)
+      .setTo(recipients)
+      .setSubject(`${storeName || 'Ayurmitti'} Shipping Update`)
+      .setHtml(`
+        <h2>Your Order Shipped 🚚</h2>
         <p><strong>Order ID:</strong> ${order.id}</p>
         <p><strong>Tracking ID:</strong> ${order.trackingId}</p>
         ${
           order.trackingUrl
-            ? `<p><a href="${order.trackingUrl}" target="_blank">Track your order</a></p>`
+            ? `<p><a href="${order.trackingUrl}">Track your order</a></p>`
             : ''
         }
-      `
-    };
+      `);
 
-    const info = await transporter.sendMail(mailOptions);
+    const response = await mailerSend.email.send(emailParams);
 
-    console.log("✅ Shipping Email Sent:", info.messageId);
+    console.log("✅ Shipping Email Sent:", response);
 
-    res.json({ success: true, messageId: info.messageId });
+    res.json({ success: true });
 
   } catch (err) {
     console.error("❌ Shipping Email Error:", err);
@@ -135,15 +121,15 @@ app.post('/api/send-shipping-update', async (req, res) => {
 });
 
 // ================= TEST ROUTES =================
-app.get('/api/send-shipping-update', (req, res) => {
-  res.send("❌ Use POST method");
-});
-
 app.get('/api/send-order-confirmation', (req, res) => {
   res.send("❌ Use POST method");
 });
 
+app.get('/api/send-shipping-update', (req, res) => {
+  res.send("❌ Use POST method");
+});
+
 // ================= START SERVER =================
-app.listen(port, '0.0.0.0', () => {
+app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
 });

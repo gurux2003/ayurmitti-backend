@@ -29,7 +29,7 @@ const mailerSend = new MailerSend({
 });
 
 const sentFrom = new Sender(
-  process.env.MAIL_FROM || "noreply@yourdomain.com",
+  process.env.MAIL_FROM || "noreply@ayurmitti.com",
   "Your Store"
 );
 

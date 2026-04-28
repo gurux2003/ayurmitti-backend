@@ -1,21 +1,23 @@
 import express from "express";
 import dotenv from "dotenv";
-import Razorpay from "razorpay";
 import crypto from "crypto";
+import Razorpay from "razorpay";
 import pkg from "mailersend";
 
-dotenv.config();
-
 const { MailerSend, EmailParams, Sender, Recipient } = pkg;
+
+dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 8080;
 
 app.use(express.json());
 
-// ================= CORS (ALLOW ALL FOR TESTING) =================
+// ================= CORS =================
+const allowedOrigin = process.env.CORS_ORIGIN || "*";
+
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*"); // ✅ allow all
+  res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
@@ -29,7 +31,7 @@ const mailerSend = new MailerSend({
 });
 
 const sentFrom = new Sender(
-  process.env.MAIL_FROM || "noreply@ayurmitti.com",
+  process.env.MAIL_FROM,
   "Ayurmitti"
 );
 
@@ -39,10 +41,13 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET
 });
 
-// ================= HEALTH =================
+// ================= ROUTES =================
+
+// Health
 app.get("/api/health", (req, res) => {
-  res.json({ status: "OK", message: "Backend running 🚀" });
+  res.json({ status: "OK 🚀" });
 });
+
 
 // ================= CREATE ORDER =================
 app.post("/api/create-order", async (req, res) => {
@@ -52,19 +57,24 @@ app.post("/api/create-order", async (req, res) => {
     const options = {
       amount: amount * 100, // ₹ → paise
       currency: "INR",
-      receipt: "receipt_" + Date.now()
+      receipt: "order_" + Date.now()
     };
 
     const order = await razorpay.orders.create(options);
 
-    res.json(order);
+    res.json({
+      success: true,
+      order
+    });
+
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Order creation failed" });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
-// ================= VERIFY PAYMENT + SEND EMAIL =================
+
+// ================= VERIFY PAYMENT + EMAIL =================
 app.post("/api/verify-payment", async (req, res) => {
   try {
     const {
@@ -74,22 +84,22 @@ app.post("/api/verify-payment", async (req, res) => {
       order
     } = req.body;
 
-    // 🔐 Signature verification
+    // 🔐 VERIFY SIGNATURE
     const body = razorpay_order_id + "|" + razorpay_payment_id;
 
     const expectedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-      .update(body.toString())
+      .update(body)
       .digest("hex");
 
     if (expectedSignature !== razorpay_signature) {
       return res.status(400).json({
         success: false,
-        message: "Invalid signature ❌"
+        message: "Payment verification failed ❌"
       });
     }
 
-    console.log("✅ Payment verified");
+    console.log("✅ Payment Verified");
 
     // ================= SEND EMAIL =================
     const recipients = [
@@ -99,31 +109,29 @@ app.post("/api/verify-payment", async (req, res) => {
     const emailParams = new EmailParams()
       .setFrom(sentFrom)
       .setTo(recipients)
-      .setSubject("Order Confirmation - Ayurmitti")
+      .setSubject("Order Confirmed 🎉")
       .setHtml(`
-        <h2>Order Confirmed ✅</h2>
-        <p><b>Order ID:</b> ${order.id}</p>
-        <p><b>Amount:</b> ₹${order.amount}</p>
-        <p>Thank you for shopping with us ❤️</p>
+        <h2>Payment Successful ✅</h2>
+        <p><strong>Order ID:</strong> ${order.id}</p>
+        <p><strong>Amount Paid:</strong> ₹${order.amount}</p>
+        <p>Thank you for shopping with us 🙏</p>
       `);
 
     await mailerSend.email.send(emailParams);
 
-    console.log("📧 Email sent");
+    console.log("📧 Email Sent");
 
     res.json({
       success: true,
-      message: "Payment verified & email sent ✅"
+      message: "Payment verified & email sent"
     });
 
   } catch (err) {
     console.error(err);
-    res.status(500).json({
-      success: false,
-      message: "Verification failed"
-    });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
+
 
 // ================= START =================
 app.listen(port, () => {

@@ -1,7 +1,8 @@
-const express = require('express');
-const dotenv = require('dotenv');
-const Razorpay = require('razorpay');
-const pkg = require('mailersend');
+import express from "express";
+import dotenv from "dotenv";
+import crypto from "crypto";
+import Razorpay from "razorpay";
+import pkg from "mailersend";
 
 const { MailerSend, EmailParams, Sender, Recipient } = pkg;
 
@@ -13,24 +14,25 @@ const port = process.env.PORT || 8080;
 app.use(express.json());
 
 // ================= CORS =================
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+const allowedOrigin = process.env.CORS_ORIGIN || "*";
 
-  if (req.method === 'OPTIONS') return res.sendStatus(200);
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") return res.sendStatus(200);
   next();
 });
 
-// ================= MAILERSEND FIX =================
-// ❗ THIS IS THE MAIN FIX
+// ================= MAILERSEND =================
 const mailerSend = new MailerSend({
-  apiKey: process.env.MAILERSEND_API_KEY // must exist
+  api_key: process.env.MAILERSEND_API_KEY
 });
 
 const sentFrom = new Sender(
-  process.env.MAIL_FROM || "noreply@ayurmitti.com",
-  "Your Store"
+  process.env.MAIL_FROM,
+  "Ayurmitti"
 );
 
 // ================= RAZORPAY =================
@@ -39,82 +41,99 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET
 });
 
-// ================= HEALTH =================
-app.get('/api/health', (req, res) => {
+// ================= ROUTES =================
+
+// Health
+app.get("/api/health", (req, res) => {
   res.json({ status: "OK 🚀" });
 });
 
-// ================= ORDER EMAIL =================
-app.post('/api/send-order-confirmation', async (req, res) => {
-  try {
-    const { order } = req.body;
 
-    const emailParams = new EmailParams()
-      .setFrom(sentFrom)
-      .setTo([new Recipient(order.email)])
-      .setSubject("Order Confirmed ✅")
-      .setHtml(`
-        <h2>Order Confirmed</h2>
-        <p>Order ID: ${order.id}</p>
-        <p>Total: ₹${order.amount}</p>
-      `);
-
-    await mailerSend.email.send(emailParams);
-
-    res.json({ success: true });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ================= SHIPPING EMAIL =================
-app.post('/api/send-shipping-update', async (req, res) => {
-  try {
-    const { order } = req.body;
-
-    const emailParams = new EmailParams()
-      .setFrom(sentFrom)
-      .setTo([new Recipient(order.email)])
-      .setSubject("Order Shipped 🚚")
-      .setHtml(`
-        <h2>Your Order Shipped</h2>
-        <p>Tracking ID: ${order.trackingId}</p>
-      `);
-
-    await mailerSend.email.send(emailParams);
-
-    res.json({ success: true });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ================= RAZORPAY ORDER =================
-app.post('/api/create-order', async (req, res) => {
+// ================= CREATE ORDER =================
+app.post("/api/create-order", async (req, res) => {
   try {
     const { amount } = req.body;
 
     const options = {
-      amount: amount * 100, // paisa
+      amount: amount * 100, // ₹ → paise
       currency: "INR",
-      receipt: "order_rcptid_" + Date.now()
+      receipt: "order_" + Date.now()
     };
 
     const order = await razorpay.orders.create(options);
 
-    res.json(order);
+    res.json({
+      success: true,
+      order
+    });
 
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
+
+// ================= VERIFY PAYMENT + EMAIL =================
+app.post("/api/verify-payment", async (req, res) => {
+  try {
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      order
+    } = req.body;
+
+    // 🔐 VERIFY SIGNATURE
+    const body = razorpay_order_id + "|" + razorpay_payment_id;
+
+    const expectedSignature = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(body)
+      .digest("hex");
+
+    if (expectedSignature !== razorpay_signature) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment verification failed ❌"
+      });
+    }
+
+    console.log("✅ Payment Verified");
+
+    // ================= SEND EMAIL =================
+    const recipients = [
+      new Recipient(order.email, order.customer || "Customer")
+    ];
+
+    const emailParams = new EmailParams()
+      .setFrom(sentFrom)
+      .setTo(recipients)
+      .setSubject("Order Confirmed 🎉")
+      .setHtml(`
+        <h2>Payment Successful ✅</h2>
+        <p><strong>Order ID:</strong> ${order.id}</p>
+        <p><strong>Amount Paid:</strong> ₹${order.amount}</p>
+        <p>Thank you for shopping with us 🙏</p>
+      `);
+
+    await mailerSend.email.send(emailParams);
+
+    console.log("📧 Email Sent");
+
+    res.json({
+      success: true,
+      message: "Payment verified & email sent"
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+
 // ================= START =================
 app.listen(port, () => {
-  console.log(`🚀 Server running on ${port}`);
+  console.log(`🚀 Server running on port ${port}`);
 });

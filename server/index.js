@@ -13,9 +13,21 @@ const port = process.env.PORT || 8080;
 
 app.use(express.json());
 
-// ================= CORS (ALLOW ALL FOR TESTING) =================
+// ================= CORS =================
+const allowedOrigins = [
+  "https://ayurmitti.com",
+  "https://www.ayurmitti.com",
+  "http://127.0.0.1:5500",
+  "http://localhost:3000"
+];
+
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*"); // ✅ allow all
+  const origin = req.headers.origin;
+
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
@@ -49,6 +61,10 @@ app.post("/api/create-order", async (req, res) => {
   try {
     const { amount } = req.body;
 
+    if (!amount) {
+      return res.status(400).json({ error: "Amount is required" });
+    }
+
     const options = {
       amount: amount * 100, // ₹ → paise
       currency: "INR",
@@ -59,12 +75,12 @@ app.post("/api/create-order", async (req, res) => {
 
     res.json(order);
   } catch (err) {
-    console.error(err);
+    console.error("❌ Order error:", err);
     res.status(500).json({ error: "Order creation failed" });
   }
 });
 
-// ================= VERIFY PAYMENT + SEND EMAIL =================
+// ================= VERIFY PAYMENT + EMAIL =================
 app.post("/api/verify-payment", async (req, res) => {
   try {
     const {
@@ -74,12 +90,12 @@ app.post("/api/verify-payment", async (req, res) => {
       order
     } = req.body;
 
-    // 🔐 Signature verification
+    // 🔐 Verify signature
     const body = razorpay_order_id + "|" + razorpay_payment_id;
 
     const expectedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-      .update(body.toString())
+      .update(body)
       .digest("hex");
 
     if (expectedSignature !== razorpay_signature) {
@@ -117,7 +133,7 @@ app.post("/api/verify-payment", async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("❌ Verify error:", err);
     res.status(500).json({
       success: false,
       message: "Verification failed"

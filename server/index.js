@@ -51,11 +51,10 @@ app.post("/api/create-order", async (req, res) => {
   try {
     const { order } = req.body;
 
-    if (!order || !order.email) {
-      return res.status(400).json({ error: "Missing order data" });
+    if (!order || !order.email || !order.id || !order.amount) {
+      return res.status(400).json({ error: "Missing order data (id, email, amount required)" });
     }
 
-    // 📧 Send Email
     const recipients = [
       new Recipient(order.email, order.customer || "Customer")
     ];
@@ -63,23 +62,24 @@ app.post("/api/create-order", async (req, res) => {
     const emailParams = new EmailParams()
       .setFrom(sentFrom)
       .setTo(recipients)
-      .setSubject("Order Placed - Ayurmitti")
+      .setSubject("Order Confirmed - Ayurmitti")
       .setHtml(`
         <h2>Order Confirmed ✅</h2>
         <p><b>Order ID:</b> ${order.id}</p>
         <p><b>Amount:</b> ₹${order.amount}</p>
+        <p>Thank you for shopping with us, ${order.customer || "Customer"}!</p>
       `);
 
     await mailerSend.email.send(emailParams);
 
     res.json({
       success: true,
-      message: "Order created & email sent ✅"
+      message: "Order confirmation email sent ✅"
     });
 
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Order failed" });
+    res.status(500).json({ error: err.message || "Order confirmation failed" });
   }
 });
 
@@ -91,13 +91,21 @@ app.post("/api/send-shipping-update", async (req, res) => {
   try {
     const { order } = req.body;
 
-    if (!order || !order.email || !order.trackingId) {
-      return res.status(400).json({ error: "Missing tracking info" });
+    if (!order || !order.email || !order.id) {
+      return res.status(400).json({ error: "Missing order data (id, email required)" });
     }
 
     const recipients = [
       new Recipient(order.email, order.customer || "Customer")
     ];
+
+    let trackingHtml = "";
+    if (order.trackingId) {
+      trackingHtml = `<p><b>Tracking ID:</b> ${order.trackingId}</p>`;
+      if (order.trackingLink) {
+        trackingHtml += `<p><a href='${order.trackingLink}' target='_blank'>Track your shipment</a></p>`;
+      }
+    }
 
     const emailParams = new EmailParams()
       .setFrom(sentFrom)
@@ -106,7 +114,7 @@ app.post("/api/send-shipping-update", async (req, res) => {
       .setHtml(`
         <h2>Your Order Shipped 🚚</h2>
         <p><b>Order ID:</b> ${order.id}</p>
-        <p><b>Tracking ID:</b> ${order.trackingId}</p>
+        ${trackingHtml}
       `);
 
     await mailerSend.email.send(emailParams);
@@ -118,7 +126,7 @@ app.post("/api/send-shipping-update", async (req, res) => {
 
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Shipping email failed" });
+    res.status(500).json({ error: err.message || "Shipping email failed" });
   }
 });
 

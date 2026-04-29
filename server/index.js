@@ -13,21 +13,9 @@ const port = process.env.PORT || 8080;
 
 app.use(express.json());
 
-// ================= CORS (UPDATED FOR AYURMITTI) =================
-const allowedOrigins = [
-  "https://ayurmitti.com",
-  "https://www.ayurmitti.com",
-  "http://127.0.0.1:5500",
-  "http://localhost:3000"
-];
-
+// ================= CORS (ALLOW ALL FOR TESTING) =================
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-
+  res.setHeader("Access-Control-Allow-Origin", "*"); // ✅ allow all
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 

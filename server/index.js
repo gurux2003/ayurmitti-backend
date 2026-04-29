@@ -2,11 +2,9 @@ import express from "express";
 import dotenv from "dotenv";
 import Razorpay from "razorpay";
 import crypto from "crypto";
-import pkg from "mailersend";
+import { Resend } from "resend";
 
 dotenv.config();
-
-const { MailerSend, EmailParams, Sender, Recipient } = pkg;
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -23,15 +21,10 @@ app.use((req, res, next) => {
   next();
 });
 
-// ================= MAILERSEND =================
-const mailerSend = new MailerSend({
-  api_key: process.env.MAILERSEND_API_KEY
-});
+// ================= RESEND =================
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-const sentFrom = new Sender(
-  process.env.MAIL_FROM || "noreply@ayurmitti.com",
-  "Ayurmitti"
-);
+const MAIL_FROM = process.env.MAIL_FROM || "noreply@ayurmitti.com";
 
 // ================= RAZORPAY =================
 const razorpay = new Razorpay({
@@ -60,23 +53,23 @@ app.post("/api/create-order", async (req, res) => {
       });
     }
 
-    const recipients = [
-      new Recipient(order.email, order.customer || "Customer")
-    ];
-
-    const emailParams = new EmailParams()
-      .setFrom(sentFrom)
-      .setTo(recipients)
-      .setSubject("Order Confirmed - Ayurmitti")
-      .setHtml(`
+    const { error } = await resend.emails.send({
+      from: `Ayurmitti <${MAIL_FROM}>`,
+      to: [order.email],
+      subject: "Order Confirmed - Ayurmitti",
+      html: `
         <h2>Order Confirmed ✅</h2>
         <p>Dear <b>${order.customer || "Customer"}</b>,</p>
         <p><b>Order ID:</b> ${order.id}</p>
         <p><b>Amount:</b> ₹${order.amount}</p>
         <p>Thank you for shopping with Ayurmitti!</p>
-      `);
+      `
+    });
 
-    await mailerSend.email.send(emailParams);
+    if (error) {
+      console.error("❌ ORDER EMAIL ERROR:", error);
+      return res.status(500).json({ error: "Order email failed", details: error.message });
+    }
 
     res.json({ success: true, message: "Order email sent ✅" });
 
@@ -102,23 +95,23 @@ app.post("/api/send-shipping-update", async (req, res) => {
       });
     }
 
-    const recipients = [
-      new Recipient(order.email, order.customer || "Customer")
-    ];
-
-    const emailParams = new EmailParams()
-      .setFrom(sentFrom)
-      .setTo(recipients)
-      .setSubject("Shipping Update - Ayurmitti")
-      .setHtml(`
+    const { error } = await resend.emails.send({
+      from: `Ayurmitti <${MAIL_FROM}>`,
+      to: [order.email],
+      subject: "Shipping Update - Ayurmitti",
+      html: `
         <h2>Your Order Shipped 🚚</h2>
         <p>Dear <b>${order.customer || "Customer"}</b>,</p>
         <p><b>Order ID:</b> ${order.id}</p>
         ${order.trackingId ? `<p><b>Tracking ID:</b> ${order.trackingId}</p>` : ""}
         <p>Thank you for shopping with Ayurmitti!</p>
-      `);
+      `
+    });
 
-    await mailerSend.email.send(emailParams);
+    if (error) {
+      console.error("❌ SHIPPING ERROR:", error);
+      return res.status(500).json({ error: "Shipping email failed", details: error.message });
+    }
 
     res.json({ success: true, message: "Shipping email sent ✅" });
 
@@ -145,7 +138,7 @@ app.post("/api/create-payment-order", async (req, res) => {
     }
 
     const order = await razorpay.orders.create({
-      amount: amount * 100, // ₹ to paise
+      amount: amount * 100,
       currency: "INR",
       receipt: "receipt_" + Date.now()
     });

@@ -15,7 +15,7 @@ app.use(express.json());
 
 // ================= CORS =================
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Origin", "https://ayurmitti.com");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
@@ -70,23 +70,19 @@ app.post("/api/create-order", async (req, res) => {
       .setSubject("Order Confirmed - Ayurmitti")
       .setHtml(`
         <h2>Order Confirmed ✅</h2>
+        <p>Dear <b>${order.customer || "Customer"}</b>,</p>
         <p><b>Order ID:</b> ${order.id}</p>
         <p><b>Amount:</b> ₹${order.amount}</p>
+        <p>Thank you for shopping with Ayurmitti!</p>
       `);
 
     await mailerSend.email.send(emailParams);
 
-    res.json({
-      success: true,
-      message: "Order email sent ✅"
-    });
+    res.json({ success: true, message: "Order email sent ✅" });
 
   } catch (err) {
     console.error("❌ ORDER EMAIL ERROR:", err);
-    res.status(500).json({
-      error: "Order failed",
-      details: err.message
-    });
+    res.status(500).json({ error: "Order failed", details: err.message });
   }
 });
 
@@ -116,33 +112,25 @@ app.post("/api/send-shipping-update", async (req, res) => {
       .setSubject("Shipping Update - Ayurmitti")
       .setHtml(`
         <h2>Your Order Shipped 🚚</h2>
+        <p>Dear <b>${order.customer || "Customer"}</b>,</p>
         <p><b>Order ID:</b> ${order.id}</p>
-        ${
-          order.trackingId
-            ? `<p><b>Tracking ID:</b> ${order.trackingId}</p>`
-            : ""
-        }
+        ${order.trackingId ? `<p><b>Tracking ID:</b> ${order.trackingId}</p>` : ""}
+        <p>Thank you for shopping with Ayurmitti!</p>
       `);
 
     await mailerSend.email.send(emailParams);
 
-    res.json({
-      success: true,
-      message: "Shipping email sent ✅"
-    });
+    res.json({ success: true, message: "Shipping email sent ✅" });
 
   } catch (err) {
     console.error("❌ SHIPPING ERROR:", err);
-    res.status(500).json({
-      error: "Shipping email failed",
-      details: err.message
-    });
+    res.status(500).json({ error: "Shipping email failed", details: err.message });
   }
 });
 
 
 // =====================================================
-// 💳 CREATE RAZORPAY ORDER (FIXED)
+// 💳 CREATE RAZORPAY ORDER
 // =====================================================
 app.post("/api/create-payment-order", async (req, res) => {
   try {
@@ -157,7 +145,7 @@ app.post("/api/create-payment-order", async (req, res) => {
     }
 
     const order = await razorpay.orders.create({
-      amount: amount * 100, // convert ₹ to paise
+      amount: amount * 100, // ₹ to paise
       currency: "INR",
       receipt: "receipt_" + Date.now()
     });
@@ -171,10 +159,7 @@ app.post("/api/create-payment-order", async (req, res) => {
 
   } catch (err) {
     console.error("❌ RAZORPAY ERROR:", err);
-    res.status(500).json({
-      error: "Payment order failed",
-      details: err.message
-    });
+    res.status(500).json({ error: "Payment order failed", details: err.message });
   }
 });
 
@@ -184,16 +169,10 @@ app.post("/api/create-payment-order", async (req, res) => {
 // =====================================================
 app.post("/api/verify-payment", (req, res) => {
   try {
-    const {
-      razorpay_order_id,
-      razorpay_payment_id,
-      razorpay_signature
-    } = req.body;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      return res.status(400).json({
-        error: "Missing payment verification data"
-      });
+      return res.status(400).json({ error: "Missing payment verification data" });
     }
 
     const body = razorpay_order_id + "|" + razorpay_payment_id;
@@ -204,23 +183,14 @@ app.post("/api/verify-payment", (req, res) => {
       .digest("hex");
 
     if (expectedSignature === razorpay_signature) {
-      return res.json({
-        success: true,
-        message: "Payment verified ✅"
-      });
+      return res.json({ success: true, message: "Payment verified ✅" });
     }
 
-    res.status(400).json({
-      success: false,
-      message: "Invalid signature ❌"
-    });
+    res.status(400).json({ success: false, message: "Invalid signature ❌" });
 
   } catch (err) {
     console.error("❌ VERIFY ERROR:", err);
-    res.status(500).json({
-      error: "Verification failed",
-      details: err.message
-    });
+    res.status(500).json({ error: "Verification failed", details: err.message });
   }
 });
 

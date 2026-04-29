@@ -18,11 +18,12 @@ app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
   if (req.method === "OPTIONS") return res.sendStatus(200);
   next();
 });
 
-// ================= MAIL =================
+// ================= MAILERSEND =================
 const mailerSend = new MailerSend({
   api_key: process.env.MAILERSEND_API_KEY
 });
@@ -40,19 +41,23 @@ const razorpay = new Razorpay({
 
 // ================= HEALTH =================
 app.get("/api/health", (req, res) => {
-  res.json({ status: "OK" });
+  res.json({ status: "OK", message: "Backend running 🚀" });
 });
 
 
 // =====================================================
-// 📦 ORDER CREATE + EMAIL
+// 📦 ORDER EMAIL
 // =====================================================
 app.post("/api/create-order", async (req, res) => {
   try {
+    console.log("📥 ORDER BODY:", req.body);
+
     const { order } = req.body;
 
     if (!order || !order.email || !order.id || !order.amount) {
-      return res.status(400).json({ error: "Missing order data (id, email, amount required)" });
+      return res.status(400).json({
+        error: "Missing order data (id, email, amount required)"
+      });
     }
 
     const recipients = [
@@ -67,19 +72,21 @@ app.post("/api/create-order", async (req, res) => {
         <h2>Order Confirmed ✅</h2>
         <p><b>Order ID:</b> ${order.id}</p>
         <p><b>Amount:</b> ₹${order.amount}</p>
-        <p>Thank you for shopping with us, ${order.customer || "Customer"}!</p>
       `);
 
     await mailerSend.email.send(emailParams);
 
     res.json({
       success: true,
-      message: "Order confirmation email sent ✅"
+      message: "Order email sent ✅"
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message || "Order confirmation failed" });
+    console.error("❌ ORDER EMAIL ERROR:", err);
+    res.status(500).json({
+      error: "Order failed",
+      details: err.message
+    });
   }
 });
 
@@ -89,23 +96,19 @@ app.post("/api/create-order", async (req, res) => {
 // =====================================================
 app.post("/api/send-shipping-update", async (req, res) => {
   try {
+    console.log("📥 SHIPPING BODY:", req.body);
+
     const { order } = req.body;
 
     if (!order || !order.email || !order.id) {
-      return res.status(400).json({ error: "Missing order data (id, email required)" });
+      return res.status(400).json({
+        error: "Missing order data (id, email required)"
+      });
     }
 
     const recipients = [
       new Recipient(order.email, order.customer || "Customer")
     ];
-
-    let trackingHtml = "";
-    if (order.trackingId) {
-      trackingHtml = `<p><b>Tracking ID:</b> ${order.trackingId}</p>`;
-      if (order.trackingLink) {
-        trackingHtml += `<p><a href='${order.trackingLink}' target='_blank'>Track your shipment</a></p>`;
-      }
-    }
 
     const emailParams = new EmailParams()
       .setFrom(sentFrom)
@@ -114,7 +117,11 @@ app.post("/api/send-shipping-update", async (req, res) => {
       .setHtml(`
         <h2>Your Order Shipped 🚚</h2>
         <p><b>Order ID:</b> ${order.id}</p>
-        ${trackingHtml}
+        ${
+          order.trackingId
+            ? `<p><b>Tracking ID:</b> ${order.trackingId}</p>`
+            : ""
+        }
       `);
 
     await mailerSend.email.send(emailParams);
@@ -125,56 +132,96 @@ app.post("/api/send-shipping-update", async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message || "Shipping email failed" });
+    console.error("❌ SHIPPING ERROR:", err);
+    res.status(500).json({
+      error: "Shipping email failed",
+      details: err.message
+    });
   }
 });
 
 
 // =====================================================
-// 💳 RAZORPAY CREATE PAYMENT ORDER
+// 💳 CREATE RAZORPAY ORDER (FIXED)
 // =====================================================
 app.post("/api/create-payment-order", async (req, res) => {
   try {
+    console.log("📥 PAYMENT BODY:", req.body);
+
     const { amount } = req.body;
 
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        error: "Amount is required and must be greater than 0"
+      });
+    }
+
     const order = await razorpay.orders.create({
-      amount: amount * 100,
+      amount: amount * 100, // convert ₹ to paise
       currency: "INR",
       receipt: "receipt_" + Date.now()
     });
 
-    res.json(order);
+    res.json({
+      success: true,
+      order_id: order.id,
+      amount: order.amount,
+      currency: order.currency
+    });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Payment order failed" });
+    console.error("❌ RAZORPAY ERROR:", err);
+    res.status(500).json({
+      error: "Payment order failed",
+      details: err.message
+    });
   }
 });
 
 
 // =====================================================
-// 🔐 VERIFY PAYMENT (NO EMAIL HERE)
+// 🔐 VERIFY PAYMENT
 // =====================================================
 app.post("/api/verify-payment", (req, res) => {
-  const {
-    razorpay_order_id,
-    razorpay_payment_id,
-    razorpay_signature
-  } = req.body;
+  try {
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature
+    } = req.body;
 
-  const body = razorpay_order_id + "|" + razorpay_payment_id;
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({
+        error: "Missing payment verification data"
+      });
+    }
 
-  const expectedSignature = crypto
-    .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
-    .update(body)
-    .digest("hex");
+    const body = razorpay_order_id + "|" + razorpay_payment_id;
 
-  if (expectedSignature === razorpay_signature) {
-    return res.json({ success: true, message: "Payment verified ✅" });
+    const expectedSignature = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(body)
+      .digest("hex");
+
+    if (expectedSignature === razorpay_signature) {
+      return res.json({
+        success: true,
+        message: "Payment verified ✅"
+      });
+    }
+
+    res.status(400).json({
+      success: false,
+      message: "Invalid signature ❌"
+    });
+
+  } catch (err) {
+    console.error("❌ VERIFY ERROR:", err);
+    res.status(500).json({
+      error: "Verification failed",
+      details: err.message
+    });
   }
-
-  res.status(400).json({ success: false, message: "Invalid signature ❌" });
 });
 
 

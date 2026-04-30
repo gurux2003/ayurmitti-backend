@@ -310,7 +310,7 @@ app.post("/api/send-shipping-update", async (req, res) => {
                 <table width="100%" cellpadding="0" cellspacing="0">
                   <tr>
                     <td style="font-size:13px;color:#6a9a7a;font-weight:300;">Tracking ID</td>
-                    <td align="right"><a href="https://www.delhivery.com/track/package/${order.trackingId}" target="_blank" style="font-family:'Cormorant Garamond',serif;font-size:18px;color:#2d5a3d;font-weight:600;letter-spacing:1px;text-decoration:underline;">${order.trackingId}</a></td>
+                    <td align="right"><a href="https://www.aftership.com/track/delhivery/${order.trackingId}" style="font-family:'Cormorant Garamond',serif;font-size:18px;color:#2d5a3d;font-weight:600;letter-spacing:1px;text-decoration:underline;display:inline-block;">${order.trackingId}</a></td>
                   </tr>
                 </table>
               </td>

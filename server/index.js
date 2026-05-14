@@ -3,19 +3,154 @@ import dotenv from "dotenv";
 import Razorpay from "razorpay";
 import crypto from "crypto";
 import postmark from "postmark";
+import pg from "pg";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
-dotenv.config();
+const { Pool } = pg;
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const rootEnvPath = path.resolve(__dirname, "..", ".env");
+const serverEnvPath = path.resolve(__dirname, ".env");
+
+if (fs.existsSync(rootEnvPath)) {
+  dotenv.config({ path: rootEnvPath });
+}
+
+if (fs.existsSync(serverEnvPath)) {
+  dotenv.config({ path: serverEnvPath, override: false });
+}
 
 const app = express();
 const port = process.env.PORT || 8080;
 
 app.use(express.json());
 
+const DATA_DIR = path.resolve(__dirname, "data");
+const ORDERS_FILE = path.join(DATA_DIR, "orders.json");
+
+const ensureOrdersFile = () => {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+
+  if (!fs.existsSync(ORDERS_FILE)) {
+    fs.writeFileSync(ORDERS_FILE, "[]", "utf-8");
+  }
+};
+
+const readOrdersFromDisk = () => {
+  try {
+    ensureOrdersFile();
+    const raw = fs.readFileSync(ORDERS_FILE, "utf-8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error("❌ Failed to read orders file:", error.message);
+    return [];
+  }
+};
+
+const writeOrdersToDisk = (orders = []) => {
+  ensureOrdersFile();
+  fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2), "utf-8");
+};
+
+const DATABASE_URL = String(process.env.DATABASE_URL || "").trim();
+const DB_SSL = String(process.env.DB_SSL || "true").toLowerCase() !== "false";
+
+let ordersPool = null;
+let isOrdersDbReady = false;
+
+if (DATABASE_URL) {
+  ordersPool = new Pool({
+    connectionString: DATABASE_URL,
+    ssl: DB_SSL ? { rejectUnauthorized: false } : false,
+  });
+}
+
+const initializeOrdersDb = async () => {
+  if (!ordersPool) return false;
+
+  try {
+    await ordersPool.query(`
+      CREATE TABLE IF NOT EXISTS orders_store (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        orders JSONB NOT NULL DEFAULT '[]'::jsonb,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await ordersPool.query(`
+      INSERT INTO orders_store (id, orders)
+      VALUES (1, '[]'::jsonb)
+      ON CONFLICT (id) DO NOTHING
+    `);
+
+    isOrdersDbReady = true;
+    console.log("✅ Orders storage: PostgreSQL (Railway)");
+    return true;
+  } catch (error) {
+    console.error("❌ PostgreSQL init failed, using file fallback:", error.message);
+    isOrdersDbReady = false;
+    return false;
+  }
+};
+
+const readOrders = async () => {
+  if (ordersPool && isOrdersDbReady) {
+    try {
+      const result = await ordersPool.query(
+        "SELECT orders FROM orders_store WHERE id = 1 LIMIT 1"
+      );
+      const rowOrders = result.rows?.[0]?.orders;
+      return Array.isArray(rowOrders) ? rowOrders : [];
+    } catch (error) {
+      console.error("❌ Failed to read orders from PostgreSQL:", error.message);
+    }
+  }
+
+  return readOrdersFromDisk();
+};
+
+const writeOrders = async (orders = []) => {
+  if (ordersPool && isOrdersDbReady) {
+    try {
+      await ordersPool.query(
+        "UPDATE orders_store SET orders = $1::jsonb, updated_at = NOW() WHERE id = 1",
+        [JSON.stringify(orders)]
+      );
+      return;
+    } catch (error) {
+      console.error("❌ Failed to write orders to PostgreSQL:", error.message);
+    }
+  }
+
+  writeOrdersToDisk(orders);
+};
+
 // ================= CORS =================
+const configuredOrigins = (process.env.CORS_ORIGIN || "https://ayurmitti.com,https://www.ayurmitti.com")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "https://ayurmitti.com");
+  const requestOrigin = req.headers.origin;
+
+  const isLocalOrigin =
+    requestOrigin && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(requestOrigin);
+
+  if (requestOrigin && (configuredOrigins.includes(requestOrigin) || isLocalOrigin)) {
+    res.setHeader("Access-Control-Allow-Origin", requestOrigin);
+    res.setHeader("Vary", "Origin");
+  }
+
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
 
   if (req.method === "OPTIONS") return res.sendStatus(200);
   next();
@@ -43,6 +178,35 @@ const razorpay = new Razorpay({
 // ================= HEALTH =================
 app.get("/api/health", (req, res) => {
   res.json({ status: "OK", message: "Backend running 🚀" });
+});
+
+app.get("/api/orders", async (req, res) => {
+  try {
+    const orders = await readOrders();
+    res.json({ success: true, orders });
+  } catch (err) {
+    console.error("❌ GET /api/orders error:", err);
+    res.status(500).json({ success: false, error: "Failed to load orders" });
+  }
+});
+
+app.post("/api/orders", async (req, res) => {
+  try {
+    const { orders } = req.body;
+
+    if (!Array.isArray(orders)) {
+      return res.status(400).json({
+        success: false,
+        error: "orders must be an array",
+      });
+    }
+
+    await writeOrders(orders);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ POST /api/orders error:", err);
+    res.status(500).json({ success: false, error: "Failed to save orders" });
+  }
 });
 
 // =====================================================
@@ -434,6 +598,12 @@ app.post("/api/verify-payment", (req, res) => {
 });
 
 // ================= START =================
-app.listen(port, () => {
-  console.log(`🚀 Server running on port ${port}`);
-});
+const startServer = async () => {
+  await initializeOrdersDb();
+
+  app.listen(port, () => {
+    console.log(`🚀 Server running on port ${port}`);
+  });
+};
+
+startServer();

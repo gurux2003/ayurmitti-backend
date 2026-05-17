@@ -40,21 +40,38 @@ export const checkDeliveryAvailability = async (pincode) => {
       throw new Error('Delhivery API key not configured');
     }
 
-    const client = getDelhiveryClient();
-    const response = await client.get(`/api/pin-codes/json/?filter={"postal_code":"${pincode}"}`, {
-      headers: {
-        'Authorization': `Token ${DELHIVERY_API_KEY}`
-      }
-    });
+    // Staging API doesn't support pincode filtering — returns full list regardless.
+    // In production, swap DELHIVERY_BASE_URL to https://track.delhivery.com
+    // and the filter will work correctly.
+    const isStaging = DELHIVERY_BASE_URL.includes('staging');
 
-    if (response.data && response.data.data && response.data.data.length > 0) {
+    if (isStaging) {
+      // Validate it's a real 6-digit Indian pincode format
+      const isValid = /^[1-9][0-9]{5}$/.test(pincode);
+      return {
+        available: isValid,
+        pincode,
+        city: '',
+        state: '',
+        deliveryTime: '3-5 business days',
+        note: 'Staging mode — pincode lookup bypassed'
+      };
+    }
+
+    // Production pincode lookup
+    const client = getDelhiveryClient();
+    const response = await client.get(
+      `/api/pin-codes/json/?filter={"postal_code":"${pincode}"}`
+    );
+
+    if (response.data?.data?.length > 0) {
       const pinData = response.data.data[0];
       return {
         available: true,
         pincode,
         city: pinData.city || '',
         state: pinData.state || '',
-        deliveryTime: pinData.Deliver_by_days || '3-5 days'
+        deliveryTime: pinData.Deliver_by_days || '3-5 business days'
       };
     }
 

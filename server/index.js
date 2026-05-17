@@ -800,6 +800,41 @@ app.post("/api/delivery/cancel", async (req, res) => {
   }
 });
 
+// =====================================================
+// 🏭 REGISTER DELHIVERY WAREHOUSE (run once)
+// =====================================================
+app.post("/api/delivery/register-warehouse", async (req, res) => {
+  try {
+    const response = await axios.post(
+      `${process.env.DELHIVERY_BASE_URL}/api/backend/clientwarehouse/create/`,
+      {
+        name: "Ayurmitti",
+        email: "info@ayurmitti.com",
+        phone: "9876543210",
+        address: "123 Main Street",
+        city: "Jaipur",
+        country: "India",
+        pin: "302001",
+        state: "Rajasthan",
+        return_address: "123 Main Street",
+        return_pin: "302001",
+        return_city: "Jaipur",
+        return_state: "Rajasthan",
+        return_country: "India"
+      },
+      {
+        headers: {
+          "Authorization": `Token ${process.env.DELHIVERY_API_KEY}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+    res.json({ success: true, data: response.data });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message, details: err.response?.data });
+  }
+});
+
 // ================= START =================
 const startServer = async () => {
   await initializeOrdersDb();

@@ -180,7 +180,7 @@ export const createShipment = async (shipmentData) => {
       }
     };
 
-    const response = await client.post('/api/v1/create/shipment/', payload);
+    const response = await client.post('/api/cmu/create.json', payload);
 
     if (response.data && response.data.shipments && response.data.shipments.length > 0) {
       const shipment = response.data.shipments[0];

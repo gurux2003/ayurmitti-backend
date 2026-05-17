@@ -812,15 +812,15 @@ app.post("/api/delivery/register-warehouse", async (req, res) => {
         name: "Ayurmitti",
         email: "info@ayurmitti.com",
         phone: "9876543210",
-        address: "123 Main Street",
-        city: "Jaipur",
+        address: "123 Andheri East",
+        city: "Mumbai",
         country: "India",
-        pin: "302001",
-        state: "Rajasthan",
-        return_address: "123 Main Street",
-        return_pin: "302001",
-        return_city: "Jaipur",
-        return_state: "Rajasthan",
+        pin: "400069",
+        state: "Maharashtra",
+        return_address: "123 Andheri East",
+        return_pin: "400069",
+        return_city: "Mumbai",
+        return_state: "Maharashtra",
         return_country: "India"
       },
       {
@@ -835,7 +835,6 @@ app.post("/api/delivery/register-warehouse", async (req, res) => {
     res.status(500).json({ success: false, error: err.message, details: err.response?.data });
   }
 });
-
 // ================= START =================
 const startServer = async () => {
   await initializeOrdersDb();

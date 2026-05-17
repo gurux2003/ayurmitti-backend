@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const DELHIVERY_BASE_URL = process.env.DELHIVERY_BASE_URL || 'https://staging-express.delhivery.com';
+const DELHIVERY_BASE_URL = process.env.DELHIVERY_BASE_URL || 'https://track.delhivery.com';
 const DELHIVERY_API_KEY = process.env.DELHIVERY_API_KEY;
 
 if (!DELHIVERY_API_KEY) {
@@ -39,6 +39,7 @@ export const checkDeliveryAvailability = async (pincode) => {
       };
     }
 
+    // Production pincode lookup
     const client = getDelhiveryClient();
     const response = await client.get(
       `/api/pin-codes/json/?filter={"postal_code":"${pincode}"}`
@@ -121,7 +122,6 @@ export const createShipment = async (shipmentData) => {
 
     const client = getDelhiveryClient();
 
-    // Delhivery expects form-encoded data for shipment creation
     const shipmentPayload = JSON.stringify({
       shipments: [
         {
@@ -134,38 +134,36 @@ export const createShipment = async (shipmentData) => {
           phone: shipmentData.customer_phone,
           order: shipmentData.order_id,
           payment_mode: shipmentData.payment_mode || 'Prepaid',
-          return_pin: '',
-          return_city: '',
-          return_phone: '',
-          return_add: '',
-          return_state: '',
+          return_pin: process.env.WAREHOUSE_PINCODE || '302001',
+          return_city: process.env.WAREHOUSE_CITY || 'Jaipur',
+          return_phone: process.env.WAREHOUSE_PHONE || '9876543210',
+          return_add: process.env.WAREHOUSE_ADDRESS || '123 Main Street',
+          return_state: process.env.WAREHOUSE_STATE || 'Rajasthan',
           return_country: 'India',
           products_desc: shipmentData.product_description || 'Ayurvedic Products',
           hsn_code: '',
           cod_amount: shipmentData.payment_mode === 'COD' ? String(shipmentData.total_amount) : '0',
           order_date: new Date().toISOString().split('T')[0],
           total_amount: String(shipmentData.total_amount || 0),
-          seller_add: '',
+          seller_add: process.env.WAREHOUSE_ADDRESS || '123 Main Street',
           seller_name: 'Ayurmitti',
-          seller_inv: '',
+          seller_inv: shipmentData.order_id,
           quantity: '1',
           waybill: '',
           shipment_width: '10',
           shipment_height: '10',
-          weight: String((shipmentData.weight || 0.5) * 1000), // grams
-          seller_gst_tin: '',
+          weight: String((shipmentData.weight || 0.5) * 1000),
+          seller_gst_tin: process.env.GST_NUMBER || '',
           shipping_mode: 'Surface',
           address_type: 'home'
         }
       ],
       pickup_location: {
-        name: 'Ayurmitti'
+        name: process.env.WAREHOUSE_NAME || 'Ayurmitti'
       }
     });
 
     const formData = `format=json&data=${encodeURIComponent(shipmentPayload)}`;
-
-    console.log('🚚 DELHIVERY SHIPMENT PAYLOAD:', shipmentPayload);
 
     const response = await client.post('/api/cmu/create.json', formData, {
       headers: {
@@ -174,15 +172,14 @@ export const createShipment = async (shipmentData) => {
       }
     });
 
-    console.log('🔍 DELHIVERY RAW RESPONSE:', JSON.stringify(response.data, null, 2));
+    console.log('🔍 DELHIVERY CREATE RESPONSE:', JSON.stringify(response.data, null, 2));
 
-    // Handle response — Delhivery returns packages array
     const packages = response.data?.packages;
     if (packages && packages.length > 0) {
       const pkg = packages[0];
       return {
         success: true,
-        shipment_id: pkg.refnum || '',
+        shipment_id: pkg.refnum || shipmentData.order_id,
         waybill: pkg.waybill || '',
         status: pkg.status || 'created',
         order_id: shipmentData.order_id,
@@ -190,17 +187,11 @@ export const createShipment = async (shipmentData) => {
       };
     }
 
-    // Some responses return cash_pickups or other formats
-    if (response.data) {
-      console.log('⚠️ Unexpected response structure:', JSON.stringify(response.data));
-      return {
-        success: false,
-        raw: response.data,
-        message: 'Unexpected response from Delhivery — check Railway logs'
-      };
+    if (response.data?.error) {
+      throw new Error(response.data?.rmk || 'Delhivery rejected the shipment');
     }
 
-    throw new Error('Failed to create shipment - no response data');
+    throw new Error('Failed to create shipment - no packages in response');
   } catch (error) {
     console.error('❌ Delhivery shipment creation failed:', error.message);
     if (error.response) {
@@ -250,7 +241,7 @@ export const cancelShipment = async (waybill) => {
     }
 
     const client = getDelhiveryClient();
-    const response = await client.post('/api/p/edit', 
+    const response = await client.post('/api/p/edit',
       `waybill=${waybill}&cancellation=true`,
       {
         headers: {
@@ -272,7 +263,7 @@ export const cancelShipment = async (waybill) => {
 
     throw new Error(response.data?.message || 'Failed to cancel shipment');
   } catch (error) {
-    console.error('❌ Delhivery shipment cancellation failed:', error.message);
+    console.error('❌ Delhivery cancellation failed:', error.message);
     throw new Error(`Failed to cancel shipment: ${error.message}`);
   }
 };

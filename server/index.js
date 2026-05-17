@@ -7,6 +7,7 @@ import pg from "pg";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import * as delhivery from "./delhivery.js";
 
 const { Pool } = pg;
 
@@ -593,6 +594,208 @@ app.post("/api/verify-payment", (req, res) => {
     res.status(500).json({
       error: "Verification failed",
       details: err.message,
+    });
+  }
+});
+
+// =====================================================
+// 🚚 DELHIVERY DELIVERY INTEGRATION
+// =====================================================
+
+/**
+ * Check delivery availability for a pincode
+ */
+app.post("/api/delivery/availability", async (req, res) => {
+  try {
+    const { pincode } = req.body;
+
+    if (!pincode) {
+      return res.status(400).json({
+        success: false,
+        message: "Pincode is required"
+      });
+    }
+
+    const result = await delhivery.checkDeliveryAvailability(pincode);
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Delivery availability error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to check delivery availability"
+    });
+  }
+});
+
+/**
+ * Calculate delivery charges
+ */
+app.post("/api/delivery/charges", async (req, res) => {
+  try {
+    const { weight = 0.5, pincode, origin_pincode = "400001" } = req.body;
+
+    if (!pincode) {
+      return res.status(400).json({
+        success: false,
+        message: "Pincode is required"
+      });
+    }
+
+    const result = await delhivery.calculateDeliveryCharges({
+      weight,
+      pincode,
+      origin_pincode
+    });
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Delivery charges error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to calculate charges"
+    });
+  }
+});
+
+/**
+ * Create a shipment with Delhivery
+ */
+app.post("/api/delivery/create-shipment", async (req, res) => {
+  try {
+    const {
+      order_id,
+      customer_name,
+      customer_phone,
+      customer_email,
+      destination_pincode,
+      destination_address,
+      destination_city,
+      destination_state,
+      payment_mode = "COD",
+      total_amount = 0,
+      product_description = "Ayurvedic Products",
+      weight = 0.5
+    } = req.body;
+
+    // Validate required fields
+    if (!order_id || !customer_name || !customer_phone || !destination_pincode || !destination_address) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields (order_id, customer_name, customer_phone, destination_pincode, destination_address)"
+      });
+    }
+
+    const shipmentData = {
+      order_id,
+      customer_name,
+      customer_phone,
+      customer_email,
+      destination_pincode,
+      destination_address,
+      destination_city: destination_city || "",
+      destination_state: destination_state || "",
+      payment_mode,
+      total_amount,
+      product_description,
+      weight
+    };
+
+    const result = await delhivery.createShipment(shipmentData);
+
+    // Update order with delivery tracking info if shipment created successfully
+    if (result.success) {
+      try {
+        const orders = await readOrders();
+        const orderIndex = orders.findIndex(o => o.id === order_id);
+        if (orderIndex !== -1) {
+          orders[orderIndex].delivery = {
+            partner: "delhivery",
+            waybill: result.waybill,
+            shipment_id: result.shipment_id,
+            status: result.status,
+            tracking_url: result.tracking_url,
+            created_at: new Date().toISOString()
+          };
+          await writeOrders(orders);
+        }
+      } catch (dbError) {
+        console.warn("⚠️ Could not update order with delivery info:", dbError.message);
+      }
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Shipment creation error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to create shipment"
+    });
+  }
+});
+
+/**
+ * Get shipment tracking information
+ */
+app.get("/api/delivery/tracking/:waybill", async (req, res) => {
+  try {
+    const { waybill } = req.params;
+
+    if (!waybill) {
+      return res.status(400).json({
+        success: false,
+        message: "Waybill is required"
+      });
+    }
+
+    const result = await delhivery.getShipmentTracking(waybill);
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Tracking error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to get tracking information"
+    });
+  }
+});
+
+/**
+ * Cancel a shipment
+ */
+app.post("/api/delivery/cancel", async (req, res) => {
+  try {
+    const { waybill } = req.body;
+
+    if (!waybill) {
+      return res.status(400).json({
+        success: false,
+        message: "Waybill is required"
+      });
+    }
+
+    const result = await delhivery.cancelShipment(waybill);
+
+    // Update order status if cancellation successful
+    if (result.success) {
+      try {
+        const orders = await readOrders();
+        for (let order of orders) {
+          if (order.delivery && order.delivery.waybill === waybill) {
+            order.delivery.status = "cancelled";
+            order.delivery.cancelled_at = new Date().toISOString();
+            break;
+          }
+        }
+        await writeOrders(orders);
+      } catch (dbError) {
+        console.warn("⚠️ Could not update order cancellation status:", dbError.message);
+      }
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error("❌ Cancellation error:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to cancel shipment"
     });
   }
 });

@@ -9,40 +9,30 @@ import path from "path";
 import { fileURLToPath } from "url";
 import axios from "axios";
 import * as delhivery from "./delhivery.js";
-
 const { Pool } = pg;
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootEnvPath = path.resolve(__dirname, "..", ".env");
 const serverEnvPath = path.resolve(__dirname, ".env");
-
 if (fs.existsSync(rootEnvPath)) {
   dotenv.config({ path: rootEnvPath });
 }
-
 if (fs.existsSync(serverEnvPath)) {
   dotenv.config({ path: serverEnvPath, override: false });
 }
-
 const app = express();
 const port = process.env.PORT || 8080;
-
 app.use(express.json());
-
 const DATA_DIR = path.resolve(__dirname, "data");
 const ORDERS_FILE = path.join(DATA_DIR, "orders.json");
-
 const ensureOrdersFile = () => {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
-
   if (!fs.existsSync(ORDERS_FILE)) {
     fs.writeFileSync(ORDERS_FILE, "[]", "utf-8");
   }
 };
-
 const readOrdersFromDisk = () => {
   try {
     ensureOrdersFile();
@@ -54,28 +44,22 @@ const readOrdersFromDisk = () => {
     return [];
   }
 };
-
 const writeOrdersToDisk = (orders = []) => {
   ensureOrdersFile();
   fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2), "utf-8");
 };
-
 const DATABASE_URL = String(process.env.DATABASE_URL || "").trim();
 const DB_SSL = String(process.env.DB_SSL || "true").toLowerCase() !== "false";
-
 let ordersPool = null;
 let isOrdersDbReady = false;
-
 if (DATABASE_URL) {
   ordersPool = new Pool({
     connectionString: DATABASE_URL,
     ssl: DB_SSL ? { rejectUnauthorized: false } : false,
   });
 }
-
 const initializeOrdersDb = async () => {
   if (!ordersPool) return false;
-
   try {
     await ordersPool.query(`
       CREATE TABLE IF NOT EXISTS orders_store (
@@ -84,13 +68,11 @@ const initializeOrdersDb = async () => {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
-
     await ordersPool.query(`
       INSERT INTO orders_store (id, orders)
       VALUES (1, '[]'::jsonb)
       ON CONFLICT (id) DO NOTHING
     `);
-
     isOrdersDbReady = true;
     console.log("✅ Orders storage: PostgreSQL (Railway)");
     return true;
@@ -100,7 +82,6 @@ const initializeOrdersDb = async () => {
     return false;
   }
 };
-
 const readOrders = async () => {
   if (ordersPool && isOrdersDbReady) {
     try {
@@ -113,10 +94,8 @@ const readOrders = async () => {
       console.error("❌ Failed to read orders from PostgreSQL:", error.message);
     }
   }
-
   return readOrdersFromDisk();
 };
-
 const writeOrders = async (orders = []) => {
   if (ordersPool && isOrdersDbReady) {
     try {
@@ -129,59 +108,46 @@ const writeOrders = async (orders = []) => {
       console.error("❌ Failed to write orders to PostgreSQL:", error.message);
     }
   }
-
   writeOrdersToDisk(orders);
 };
-
 // ================= CORS =================
 const configuredOrigins = (process.env.CORS_ORIGIN || "https://ayurmitti.com,https://www.ayurmitti.com")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
-
 app.use((req, res, next) => {
   const requestOrigin = req.headers.origin;
-
   const isLocalOrigin =
     requestOrigin && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(requestOrigin);
-
   if (requestOrigin && (configuredOrigins.includes(requestOrigin) || isLocalOrigin)) {
     res.setHeader("Access-Control-Allow-Origin", requestOrigin);
     res.setHeader("Vary", "Origin");
   }
-
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
   res.setHeader("Access-Control-Allow-Credentials", "true");
-
   if (req.method === "OPTIONS") return res.sendStatus(200);
   next();
 });
-
 // ================= POSTMARK =================
 if (!process.env.POSTMARK_API_KEY) {
   console.error("❌ POSTMARK_API_KEY missing");
   process.exit(1);
 }
-
 const postmarkClient = new postmark.ServerClient(
   process.env.POSTMARK_API_KEY
 );
-
 const MAIL_FROM =
   process.env.MAIL_FROM || "Ayurmitti <info@ayurmitti.com>";
-
 // ================= RAZORPAY =================
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
-
 // ================= HEALTH =================
 app.get("/api/health", (req, res) => {
   res.json({ status: "OK", message: "Backend running 🚀" });
 });
-
 app.get("/api/orders", async (req, res) => {
   try {
     const orders = await readOrders();
@@ -191,18 +157,15 @@ app.get("/api/orders", async (req, res) => {
     res.status(500).json({ success: false, error: "Failed to load orders" });
   }
 });
-
 app.post("/api/orders", async (req, res) => {
   try {
     const { orders } = req.body;
-
     if (!Array.isArray(orders)) {
       return res.status(400).json({
         success: false,
         error: "orders must be an array",
       });
     }
-
     await writeOrders(orders);
     res.json({ success: true });
   } catch (err) {
@@ -210,22 +173,18 @@ app.post("/api/orders", async (req, res) => {
     res.status(500).json({ success: false, error: "Failed to save orders" });
   }
 });
-
 // =====================================================
 // 📦 ORDER EMAIL
 // =====================================================
 app.post("/api/create-order", async (req, res) => {
   try {
     console.log("📥 ORDER BODY:", req.body);
-
     const { order } = req.body;
-
     if (!order || !order.email || !order.id || !order.amount) {
       return res.status(400).json({
         error: "Missing order data (id, email, amount required)",
       });
     }
-
     await postmarkClient.sendEmail({
       From: MAIL_FROM,
       To: order.email,
@@ -242,14 +201,12 @@ app.post("/api/create-order", async (req, res) => {
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f7f2ea;padding:48px 16px;">
   <tr><td align="center">
     <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;">
-
       <!-- TOP LOGO BAR -->
       <tr>
         <td style="padding-bottom:24px;text-align:center;">
           <p style="margin:0;font-family:'Cormorant Garamond',serif;font-size:13px;letter-spacing:6px;color:#8b6b47;text-transform:uppercase;">Ayurmitti</p>
         </td>
       </tr>
-
       <!-- HERO PANEL -->
       <tr>
         <td style="background:linear-gradient(135deg,#2c1e0f 0%,#4a2f1a 60%,#6b3e20 100%);border-radius:16px 16px 0 0;padding:52px 48px 44px;text-align:center;">
@@ -262,18 +219,15 @@ app.post("/api/create-order", async (req, res) => {
           <p style="margin:0;font-size:13px;color:#c9a96e;letter-spacing:3px;text-transform:uppercase;font-weight:300;">Thank you for your purchase</p>
         </td>
       </tr>
-
       <!-- WHITE BODY -->
       <tr>
         <td style="background:#ffffff;padding:44px 48px;">
-
           <!-- Greeting -->
           <p style="margin:0 0 8px;font-size:12px;letter-spacing:3px;color:#a08060;text-transform:uppercase;font-weight:500;">Dear</p>
           <h2 style="margin:0 0 24px;font-family:'Cormorant Garamond',serif;font-size:28px;color:#2c1e0f;font-weight:600;">${order.customer || "Valued Customer"}</h2>
           <p style="margin:0 0 36px;font-size:15px;color:#6b5040;line-height:1.8;font-weight:300;">
             Your order has been received and is being lovingly prepared. We blend ancient Ayurvedic wisdom with pure natural ingredients — your wellness journey begins now.
           </p>
-
           <!-- Divider leaf -->
           <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:32px;">
             <tr>
@@ -282,7 +236,6 @@ app.post("/api/create-order", async (req, res) => {
               <td style="border-top:1px solid #ede5d8;"></td>
             </tr>
           </table>
-
           <!-- Order Details -->
           <p style="margin:0 0 16px;font-size:11px;letter-spacing:4px;color:#a08060;text-transform:uppercase;font-weight:500;">Order Details</p>
           <table width="100%" cellpadding="0" cellspacing="0" style="background:#faf5ed;border-radius:10px;border:1px solid #ede5d8;">
@@ -319,14 +272,12 @@ app.post("/api/create-order", async (req, res) => {
               </td>
             </tr>
           </table>
-
           <!-- Message -->
           <p style="margin:32px 0 0;font-size:14px;color:#9a7a5a;line-height:1.8;font-weight:300;">
             Questions? We're here for you at <a href="mailto:info@ayurmitti.com" style="color:#c9a96e;text-decoration:none;font-weight:500;">info@ayurmitti.com</a>
           </p>
         </td>
       </tr>
-
       <!-- FOOTER -->
       <tr>
         <td style="background:#2c1e0f;border-radius:0 0 16px 16px;padding:28px 48px;text-align:center;">
@@ -334,7 +285,6 @@ app.post("/api/create-order", async (req, res) => {
           <p style="margin:0;font-size:11px;color:#6b5040;letter-spacing:1px;">© 2025 Ayurmitti &nbsp;·&nbsp; <a href="https://ayurmitti.com" style="color:#6b5040;text-decoration:none;">ayurmitti.com</a></p>
         </td>
       </tr>
-
     </table>
   </td></tr>
 </table>
@@ -342,7 +292,6 @@ app.post("/api/create-order", async (req, res) => {
 </html>`,
       TextBody: `Order Confirmed! Order ID: ${order.id} | Amount: ₹${order.amount} | Thank you for shopping with Ayurmitti.`,
     });
-
     res.json({ success: true, message: "Order email sent ✅" });
   } catch (err) {
     console.error("❌ ORDER EMAIL ERROR:", err);
@@ -352,22 +301,18 @@ app.post("/api/create-order", async (req, res) => {
     });
   }
 });
-
 // =====================================================
 // 🚚 SHIPPING EMAIL
 // =====================================================
 app.post("/api/send-shipping-update", async (req, res) => {
   try {
     console.log("📥 SHIPPING BODY:", req.body);
-
     const { order } = req.body;
-
     if (!order || !order.email || !order.id) {
       return res.status(400).json({
         error: "Missing order data (id, email required)",
       });
     }
-
     await postmarkClient.sendEmail({
       From: MAIL_FROM,
       To: order.email,
@@ -384,14 +329,12 @@ app.post("/api/send-shipping-update", async (req, res) => {
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f4f0;padding:48px 16px;">
   <tr><td align="center">
     <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;">
-
       <!-- TOP LOGO BAR -->
       <tr>
         <td style="padding-bottom:24px;text-align:center;">
           <p style="margin:0;font-family:'Cormorant Garamond',serif;font-size:13px;letter-spacing:6px;color:#4a7c59;text-transform:uppercase;">Ayurmitti</p>
         </td>
       </tr>
-
       <!-- HERO PANEL -->
       <tr>
         <td style="background:linear-gradient(135deg,#1a3a28 0%,#2d5a3d 55%,#3d7a50 100%);border-radius:16px 16px 0 0;padding:52px 48px 44px;text-align:center;">
@@ -404,18 +347,15 @@ app.post("/api/send-shipping-update", async (req, res) => {
           <p style="margin:0;font-size:13px;color:#8ecba0;letter-spacing:3px;text-transform:uppercase;font-weight:300;">On its way to you</p>
         </td>
       </tr>
-
       <!-- WHITE BODY -->
       <tr>
         <td style="background:#ffffff;padding:44px 48px;">
-
           <!-- Greeting -->
           <p style="margin:0 0 8px;font-size:12px;letter-spacing:3px;color:#5a8a6a;text-transform:uppercase;font-weight:500;">Dear</p>
           <h2 style="margin:0 0 24px;font-family:'Cormorant Garamond',serif;font-size:28px;color:#1a3a28;font-weight:600;">${order.customer || "Valued Customer"}</h2>
           <p style="margin:0 0 36px;font-size:15px;color:#3a5a4a;line-height:1.8;font-weight:300;">
             Great news! Your Ayurmitti order has been dispatched and is making its way to you. Pure nature is headed to your doorstep — get ready to experience the difference.
           </p>
-
           <!-- Progress Steps -->
           <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:36px;">
             <tr>
@@ -447,7 +387,6 @@ app.post("/api/send-shipping-update", async (req, res) => {
               </td>
             </tr>
           </table>
-
           <!-- Divider -->
           <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:32px;">
             <tr>
@@ -456,7 +395,6 @@ app.post("/api/send-shipping-update", async (req, res) => {
               <td style="border-top:1px solid #d8ede0;"></td>
             </tr>
           </table>
-
           <!-- Shipment Details -->
           <p style="margin:0 0 16px;font-size:11px;letter-spacing:4px;color:#5a8a6a;text-transform:uppercase;font-weight:500;">Shipment Details</p>
           <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4faf5;border-radius:10px;border:1px solid #d8ede0;">
@@ -482,13 +420,11 @@ app.post("/api/send-shipping-update", async (req, res) => {
               </td>
             </tr>` : ""}
           </table>
-
           <p style="margin:32px 0 0;font-size:14px;color:#6a9a7a;line-height:1.8;font-weight:300;">
             Need help? Reach us at <a href="mailto:info@ayurmitti.com" style="color:#2d5a3d;text-decoration:none;font-weight:500;">info@ayurmitti.com</a>
           </p>
         </td>
       </tr>
-
       <!-- FOOTER -->
       <tr>
         <td style="background:#1a3a28;border-radius:0 0 16px 16px;padding:28px 48px;text-align:center;">
@@ -496,7 +432,6 @@ app.post("/api/send-shipping-update", async (req, res) => {
           <p style="margin:0;font-size:11px;color:#3a6a4a;letter-spacing:1px;">© 2025 Ayurmitti &nbsp;·&nbsp; <a href="https://ayurmitti.com" style="color:#3a6a4a;text-decoration:none;">ayurmitti.com</a></p>
         </td>
       </tr>
-
     </table>
   </td></tr>
 </table>
@@ -504,7 +439,6 @@ app.post("/api/send-shipping-update", async (req, res) => {
 </html>`,
       TextBody: `Your order has been shipped! Order ID: ${order.id}${order.trackingId ? ` | Tracking ID: ${order.trackingId}` : ""}. Thank you for shopping with Ayurmitti.`,
     });
-
     res.json({ success: true, message: "Shipping email sent ✅" });
   } catch (err) {
     console.error("❌ SHIPPING ERROR:", err);
@@ -514,28 +448,23 @@ app.post("/api/send-shipping-update", async (req, res) => {
     });
   }
 });
-
 // =====================================================
 // 💳 CREATE RAZORPAY ORDER
 // =====================================================
 app.post("/api/create-payment-order", async (req, res) => {
   try {
     console.log("📥 PAYMENT BODY:", req.body);
-
     const { amount } = req.body;
-
     if (!amount || amount <= 0) {
       return res.status(400).json({
         error: "Amount is required and must be greater than 0",
       });
     }
-
     const order = await razorpay.orders.create({
       amount: amount * 100,
       currency: "INR",
       receipt: "receipt_" + Date.now(),
     });
-
     res.json({
       success: true,
       order_id: order.id,
@@ -550,7 +479,6 @@ app.post("/api/create-payment-order", async (req, res) => {
     });
   }
 });
-
 // =====================================================
 // 🔐 VERIFY PAYMENT
 // =====================================================
@@ -561,7 +489,6 @@ app.post("/api/verify-payment", (req, res) => {
       razorpay_payment_id,
       razorpay_signature,
     } = req.body;
-
     if (
       !razorpay_order_id ||
       !razorpay_payment_id ||
@@ -571,21 +498,17 @@ app.post("/api/verify-payment", (req, res) => {
         .status(400)
         .json({ error: "Missing payment verification data" });
     }
-
     const body = razorpay_order_id + "|" + razorpay_payment_id;
-
     const expectedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
       .update(body)
       .digest("hex");
-
     if (expectedSignature === razorpay_signature) {
       return res.json({
         success: true,
         message: "Payment verified ✅",
       });
     }
-
     res.status(400).json({
       success: false,
       message: "Invalid signature ❌",
@@ -598,25 +521,21 @@ app.post("/api/verify-payment", (req, res) => {
     });
   }
 });
-
 // =====================================================
 // 🚚 DELHIVERY DELIVERY INTEGRATION
 // =====================================================
-
 /**
  * Check delivery availability for a pincode
  */
 app.post("/api/delivery/availability", async (req, res) => {
   try {
     const { pincode } = req.body;
-
     if (!pincode) {
       return res.status(400).json({
         success: false,
         message: "Pincode is required"
       });
     }
-
     const result = await delhivery.checkDeliveryAvailability(pincode);
     res.json(result);
   } catch (error) {
@@ -627,21 +546,18 @@ app.post("/api/delivery/availability", async (req, res) => {
     });
   }
 });
-
 /**
  * Calculate delivery charges
  */
 app.post("/api/delivery/charges", async (req, res) => {
   try {
-    const { weight = 0.5, pincode, origin_pincode = "400001" } = req.body;
-
+    const { weight = 0.5, pincode, origin_pincode = process.env.WAREHOUSE_PINCODE || "332404" } = req.body;
     if (!pincode) {
       return res.status(400).json({
         success: false,
         message: "Pincode is required"
       });
     }
-
     const result = await delhivery.calculateDeliveryCharges({
       weight,
       pincode,
@@ -656,7 +572,6 @@ app.post("/api/delivery/charges", async (req, res) => {
     });
   }
 });
-
 /**
  * Create a shipment with Delhivery
  */
@@ -671,12 +586,14 @@ app.post("/api/delivery/create-shipment", async (req, res) => {
       destination_address,
       destination_city,
       destination_state,
-      payment_mode = "COD",
+      payment_mode = "Prepaid",
       total_amount = 0,
       product_description = "Ayurvedic Products",
       weight = 0.5
     } = req.body;
-
+    // Map payment_mode to Delhivery accepted values:
+    // "COD" stays "COD"; anything else (Razorpay online, "Prepaid", etc.) becomes "Prepaid"
+    const deliveryPaymentMode = payment_mode.toLowerCase() === "cod" ? "COD" : "Prepaid";
     // Validate required fields
     if (!order_id || !customer_name || !customer_phone || !destination_pincode || !destination_address) {
       return res.status(400).json({
@@ -684,7 +601,6 @@ app.post("/api/delivery/create-shipment", async (req, res) => {
         message: "Missing required fields (order_id, customer_name, customer_phone, destination_pincode, destination_address)"
       });
     }
-
     const shipmentData = {
       order_id,
       customer_name,
@@ -694,14 +610,12 @@ app.post("/api/delivery/create-shipment", async (req, res) => {
       destination_address,
       destination_city: destination_city || "",
       destination_state: destination_state || "",
-      payment_mode,
+      payment_mode: deliveryPaymentMode,
       total_amount,
       product_description,
       weight
     };
-
     const result = await delhivery.createShipment(shipmentData);
-
     // Update order with delivery tracking info if shipment created successfully
     if (result.success) {
       try {
@@ -722,7 +636,6 @@ app.post("/api/delivery/create-shipment", async (req, res) => {
         console.warn("⚠️ Could not update order with delivery info:", dbError.message);
       }
     }
-
     res.json(result);
   } catch (error) {
     console.error("❌ Shipment creation error:", error.message);
@@ -732,21 +645,18 @@ app.post("/api/delivery/create-shipment", async (req, res) => {
     });
   }
 });
-
 /**
  * Get shipment tracking information
  */
 app.get("/api/delivery/tracking/:waybill", async (req, res) => {
   try {
     const { waybill } = req.params;
-
     if (!waybill) {
       return res.status(400).json({
         success: false,
         message: "Waybill is required"
       });
     }
-
     const result = await delhivery.getShipmentTracking(waybill);
     res.json(result);
   } catch (error) {
@@ -757,23 +667,19 @@ app.get("/api/delivery/tracking/:waybill", async (req, res) => {
     });
   }
 });
-
 /**
  * Cancel a shipment
  */
 app.post("/api/delivery/cancel", async (req, res) => {
   try {
     const { waybill } = req.body;
-
     if (!waybill) {
       return res.status(400).json({
         success: false,
         message: "Waybill is required"
       });
     }
-
     const result = await delhivery.cancelShipment(waybill);
-
     // Update order status if cancellation successful
     if (result.success) {
       try {
@@ -790,7 +696,6 @@ app.post("/api/delivery/cancel", async (req, res) => {
         console.warn("⚠️ Could not update order cancellation status:", dbError.message);
       }
     }
-
     res.json(result);
   } catch (error) {
     console.error("❌ Cancellation error:", error.message);
@@ -800,7 +705,6 @@ app.post("/api/delivery/cancel", async (req, res) => {
     });
   }
 });
-
 // =====================================================
 // 🏭 REGISTER DELHIVERY WAREHOUSE (run once)
 // =====================================================
@@ -809,18 +713,18 @@ app.post("/api/delivery/register-warehouse", async (req, res) => {
     const response = await axios.post(
       `${process.env.DELHIVERY_BASE_URL}/api/backend/clientwarehouse/create/`,
       {
-        name: "Ayurmitti",
-        email: "info@ayurmitti.com",
-        phone: "9876543210",
-        address: "123 Andheri East",
-        city: "Mumbai",
+        name: process.env.WAREHOUSE_NAME || "G S TRADERS",
+        email: process.env.WAREHOUSE_EMAIL || "vijay.mahroli@gmail.com",
+        phone: process.env.WAREHOUSE_PHONE || "9636910582",
+        address: process.env.WAREHOUSE_ADDRESS || "SHAHID MAGAN SINGH COLONY, WARD NO-15, Mahroli",
+        city: process.env.WAREHOUSE_CITY || "Reengus",
         country: "India",
-        pin: "400069",
-        state: "Maharashtra",
-        return_address: "123 Andheri East",
-        return_pin: "400069",
-        return_city: "Mumbai",
-        return_state: "Maharashtra",
+        pin: process.env.WAREHOUSE_PINCODE || "332404",
+        state: process.env.WAREHOUSE_STATE || "Rajasthan",
+        return_address: process.env.WAREHOUSE_ADDRESS || "SHAHID MAGAN SINGH COLONY, WARD NO-15, Mahroli",
+        return_pin: process.env.WAREHOUSE_PINCODE || "332404",
+        return_city: process.env.WAREHOUSE_CITY || "Reengus",
+        return_state: process.env.WAREHOUSE_STATE || "Rajasthan",
         return_country: "India"
       },
       {
@@ -832,16 +736,15 @@ app.post("/api/delivery/register-warehouse", async (req, res) => {
     );
     res.json({ success: true, data: response.data });
   } catch (err) {
+    console.error("❌ Warehouse registration error:", err.message);
     res.status(500).json({ success: false, error: err.message, details: err.response?.data });
   }
 });
 // ================= START =================
 const startServer = async () => {
   await initializeOrdersDb();
-
   app.listen(port, () => {
     console.log(`🚀 Server running on port ${port}`);
   });
 };
-
 startServer();

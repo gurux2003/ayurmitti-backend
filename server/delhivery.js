@@ -1,22 +1,12 @@
-/**
- * Delhivery API Integration Module
- * Handles all Delhivery delivery operations
- */
-
 import axios from 'axios';
 
 const DELHIVERY_BASE_URL = process.env.DELHIVERY_BASE_URL || 'https://staging-express.delhivery.com';
 const DELHIVERY_API_KEY = process.env.DELHIVERY_API_KEY;
-const DELHIVERY_CLIENT_ID = process.env.DELHIVERY_CLIENT_ID;
-const DELHIVERY_CLIENT_SECRET = process.env.DELHIVERY_CLIENT_SECRET;
 
 if (!DELHIVERY_API_KEY) {
   console.warn('⚠️ DELHIVERY_API_KEY is not set. Delivery features will not work.');
 }
 
-/**
- * Create an axios instance with Delhivery auth headers
- */
 const getDelhiveryClient = () => {
   return axios.create({
     baseURL: DELHIVERY_BASE_URL,
@@ -29,24 +19,15 @@ const getDelhiveryClient = () => {
   });
 };
 
-/**
- * Check if delivery is available for the given pincode
- * @param {string} pincode - Destination pincode
- * @returns {Promise<Object>} Availability response
- */
 export const checkDeliveryAvailability = async (pincode) => {
   try {
     if (!DELHIVERY_API_KEY) {
       throw new Error('Delhivery API key not configured');
     }
 
-    // Staging API doesn't support pincode filtering — returns full list regardless.
-    // In production, swap DELHIVERY_BASE_URL to https://track.delhivery.com
-    // and the filter will work correctly.
     const isStaging = DELHIVERY_BASE_URL.includes('staging');
 
     if (isStaging) {
-      // Validate it's a real 6-digit Indian pincode format
       const isValid = /^[1-9][0-9]{5}$/.test(pincode);
       return {
         available: isValid,
@@ -58,7 +39,6 @@ export const checkDeliveryAvailability = async (pincode) => {
       };
     }
 
-    // Production pincode lookup
     const client = getDelhiveryClient();
     const response = await client.get(
       `/api/pin-codes/json/?filter={"postal_code":"${pincode}"}`
@@ -86,30 +66,22 @@ export const checkDeliveryAvailability = async (pincode) => {
   }
 };
 
-/**
- * Calculate delivery charges
- * @param {Object} params - Delivery parameters
- * @returns {Promise<Object>} Charge details
- */
-export const calculateDeliveryCharges = async ({ weight, pincode, origin_pincode = '400001' }) => {
+export const calculateDeliveryCharges = async ({ weight, pincode, origin_pincode = '302001' }) => {
   try {
     if (!DELHIVERY_API_KEY) {
       throw new Error('Delhivery API key not configured');
     }
 
-    // Delhivery doesn't have a public charges API, so we use a fixed pricing model
-    // Adjust these based on your agreements with Delhivery
     const WEIGHT_SLAB = weight <= 0.5 ? 'light' : weight <= 2 ? 'medium' : 'heavy';
-    
+
     const chargesMap = {
       light: { local: 30, metro: 40, national: 80 },
       medium: { local: 50, metro: 70, national: 120 },
       heavy: { local: 80, metro: 110, national: 180 }
     };
 
-    // Determine zone based on pincode (simplified - enhance based on your zones)
     let zone = 'national';
-    const metroPin = ['400', '110', '201', '302']; // Mumbai, Delhi, Noida, Jaipur
+    const metroPin = ['400', '110', '201', '302'];
     if (metroPin.some(p => pincode.startsWith(p))) {
       zone = 'metro';
     } else if (Math.abs(parseInt(pincode.substring(0, 3)) - parseInt(origin_pincode.substring(0, 3))) < 50) {
@@ -134,19 +106,13 @@ export const calculateDeliveryCharges = async ({ weight, pincode, origin_pincode
   }
 };
 
-/**
- * Create a shipment with Delhivery
- * @param {Object} shipmentData - Shipment details
- * @returns {Promise<Object>} Shipment response
- */
 export const createShipment = async (shipmentData) => {
   try {
     if (!DELHIVERY_API_KEY) {
       throw new Error('Delhivery API key not configured');
     }
 
-    // Validate required fields
-    const requiredFields = ['order_id', 'customer_name', 'customer_phone', 'customer_email', 'destination_pincode', 'destination_address'];
+    const requiredFields = ['order_id', 'customer_name', 'customer_phone', 'destination_pincode', 'destination_address'];
     for (const field of requiredFields) {
       if (!shipmentData[field]) {
         throw new Error(`Missing required field: ${field}`);
@@ -155,57 +121,95 @@ export const createShipment = async (shipmentData) => {
 
     const client = getDelhiveryClient();
 
-    // Format shipment data for Delhivery API
-    const payload = {
-      format: 'json',
-      data: {
-        shipments: [
-          {
-            name: shipmentData.customer_name,
-            add: shipmentData.destination_address,
-            pin: shipmentData.destination_pincode,
-            city: shipmentData.destination_city || '',
-            state: shipmentData.destination_state || '',
-            country: 'India',
-            phone: shipmentData.customer_phone,
-            email: shipmentData.customer_email,
-            order: shipmentData.order_id,
-            payment_mode: shipmentData.payment_mode || 'COD', // COD or PREPAID
-            total_amount: shipmentData.total_amount || 0,
-            contents_desc: shipmentData.product_description || 'Ayurvedic Products',
-            weight: shipmentData.weight || 0.5,
-            waybill: shipmentData.waybill || ''
-          }
-        ]
+    // Delhivery expects form-encoded data for shipment creation
+    const shipmentPayload = JSON.stringify({
+      shipments: [
+        {
+          name: shipmentData.customer_name,
+          add: shipmentData.destination_address,
+          pin: shipmentData.destination_pincode,
+          city: shipmentData.destination_city || '',
+          state: shipmentData.destination_state || '',
+          country: 'India',
+          phone: shipmentData.customer_phone,
+          order: shipmentData.order_id,
+          payment_mode: shipmentData.payment_mode || 'Prepaid',
+          return_pin: '',
+          return_city: '',
+          return_phone: '',
+          return_add: '',
+          return_state: '',
+          return_country: 'India',
+          products_desc: shipmentData.product_description || 'Ayurvedic Products',
+          hsn_code: '',
+          cod_amount: shipmentData.payment_mode === 'COD' ? String(shipmentData.total_amount) : '0',
+          order_date: new Date().toISOString().split('T')[0],
+          total_amount: String(shipmentData.total_amount || 0),
+          seller_add: '',
+          seller_name: 'Ayurmitti',
+          seller_inv: '',
+          quantity: '1',
+          waybill: '',
+          shipment_width: '10',
+          shipment_height: '10',
+          weight: String((shipmentData.weight || 0.5) * 1000), // grams
+          seller_gst_tin: '',
+          shipping_mode: 'Surface',
+          address_type: 'home'
+        }
+      ],
+      pickup_location: {
+        name: 'Ayurmitti'
       }
-    };
+    });
 
-    const response = await client.post('/api/cmu/create.json', payload);
+    const formData = `format=json&data=${encodeURIComponent(shipmentPayload)}`;
 
-    if (response.data && response.data.shipments && response.data.shipments.length > 0) {
-      const shipment = response.data.shipments[0];
+    console.log('🚚 DELHIVERY SHIPMENT PAYLOAD:', shipmentPayload);
+
+    const response = await client.post('/api/cmu/create.json', formData, {
+      headers: {
+        'Authorization': `Token ${DELHIVERY_API_KEY}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    });
+
+    console.log('🔍 DELHIVERY RAW RESPONSE:', JSON.stringify(response.data, null, 2));
+
+    // Handle response — Delhivery returns packages array
+    const packages = response.data?.packages;
+    if (packages && packages.length > 0) {
+      const pkg = packages[0];
       return {
         success: true,
-        shipment_id: shipment.shipment_id,
-        waybill: shipment.waybill,
-        status: shipment.status,
+        shipment_id: pkg.refnum || '',
+        waybill: pkg.waybill || '',
+        status: pkg.status || 'created',
         order_id: shipmentData.order_id,
-        tracking_url: `https://track.delhivery.com/${shipment.waybill}`
+        tracking_url: `https://track.delhivery.com/${pkg.waybill}`
+      };
+    }
+
+    // Some responses return cash_pickups or other formats
+    if (response.data) {
+      console.log('⚠️ Unexpected response structure:', JSON.stringify(response.data));
+      return {
+        success: false,
+        raw: response.data,
+        message: 'Unexpected response from Delhivery — check Railway logs'
       };
     }
 
     throw new Error('Failed to create shipment - no response data');
   } catch (error) {
     console.error('❌ Delhivery shipment creation failed:', error.message);
+    if (error.response) {
+      console.error('❌ Delhivery error response:', JSON.stringify(error.response.data, null, 2));
+    }
     throw new Error(`Failed to create shipment: ${error.message}`);
   }
 };
 
-/**
- * Get shipment tracking details
- * @param {string} waybill - Delhivery waybill number
- * @returns {Promise<Object>} Tracking information
- */
 export const getShipmentTracking = async (waybill) => {
   try {
     if (!DELHIVERY_API_KEY) {
@@ -213,18 +217,19 @@ export const getShipmentTracking = async (waybill) => {
     }
 
     const client = getDelhiveryClient();
-    const response = await client.get(`/api/p/v1/tracking/json/?waybill=${waybill}`);
+    const response = await client.get(`/api/v1/packages/json/?waybill=${waybill}`);
 
-    if (response.data && response.data.data && response.data.data.length > 0) {
-      const tracking = response.data.data[0];
+    console.log('🔍 DELHIVERY TRACKING RESPONSE:', JSON.stringify(response.data, null, 2));
+
+    if (response.data?.ShipmentData?.length > 0) {
+      const tracking = response.data.ShipmentData[0].Shipment;
       return {
         success: true,
         waybill,
-        status: tracking.status,
-        last_update: tracking.last_update || new Date().toISOString(),
-        location: tracking.location || 'In Transit',
-        attempts: tracking.attempts || 0,
-        return_reason: tracking.return_reason || null
+        status: tracking.Status?.Status || 'In Transit',
+        last_update: tracking.Status?.StatusDateTime || new Date().toISOString(),
+        location: tracking.Status?.StatusLocation || 'In Transit',
+        attempts: tracking.Attempts || 0
       };
     }
 
@@ -238,11 +243,6 @@ export const getShipmentTracking = async (waybill) => {
   }
 };
 
-/**
- * Cancel a shipment
- * @param {string} waybill - Delhivery waybill number
- * @returns {Promise<Object>} Cancellation response
- */
 export const cancelShipment = async (waybill) => {
   try {
     if (!DELHIVERY_API_KEY) {
@@ -250,14 +250,19 @@ export const cancelShipment = async (waybill) => {
     }
 
     const client = getDelhiveryClient();
-    const response = await client.post('/api/v1/shipments/cancel/', {
-      format: 'json',
-      data: {
-        shipments: [{ waybill }]
+    const response = await client.post('/api/p/edit', 
+      `waybill=${waybill}&cancellation=true`,
+      {
+        headers: {
+          'Authorization': `Token ${DELHIVERY_API_KEY}`,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
       }
-    });
+    );
 
-    if (response.data && response.data.success) {
+    console.log('🔍 DELHIVERY CANCEL RESPONSE:', JSON.stringify(response.data, null, 2));
+
+    if (response.data?.status === true) {
       return {
         success: true,
         waybill,

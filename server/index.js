@@ -740,9 +740,67 @@ app.post("/api/delivery/register-warehouse", async (req, res) => {
     res.status(500).json({ success: false, error: err.message, details: err.response?.data });
   }
 });
+
+// =====================================================
+// 🛍️ PRODUCTS
+// =====================================================
+const initializeProductsDb = async () => {
+  if (!ordersPool) return false;
+  try {
+    await ordersPool.query(`
+      CREATE TABLE IF NOT EXISTS products_store (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        products JSONB NOT NULL DEFAULT '[]'::jsonb,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await ordersPool.query(`
+      INSERT INTO products_store (id, products)
+      VALUES (1, '[]'::jsonb)
+      ON CONFLICT (id) DO NOTHING
+    `);
+    console.log("✅ Products storage: PostgreSQL");
+    return true;
+  } catch (error) {
+    console.error("❌ Products DB init failed:", error.message);
+    return false;
+  }
+};
+
+app.get("/api/products", async (req, res) => {
+  try {
+    const result = await ordersPool.query(
+      "SELECT products FROM products_store WHERE id = 1 LIMIT 1"
+    );
+    const products = result.rows?.[0]?.products;
+    res.json({ success: true, products: Array.isArray(products) ? products : [] });
+  } catch (err) {
+    console.error("❌ GET /api/products error:", err);
+    res.status(500).json({ success: false, error: "Failed to load products" });
+  }
+});
+
+app.post("/api/products", async (req, res) => {
+  try {
+    const { products } = req.body;
+    if (!Array.isArray(products)) {
+      return res.status(400).json({ success: false, error: "products must be an array" });
+    }
+    await ordersPool.query(
+      "UPDATE products_store SET products = $1::jsonb, updated_at = NOW() WHERE id = 1",
+      [JSON.stringify(products)]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ POST /api/products error:", err);
+    res.status(500).json({ success: false, error: "Failed to save products" });
+  }
+});
+
 // ================= START =================
 const startServer = async () => {
   await initializeOrdersDb();
+  await initializeProductsDb();
   app.listen(port, () => {
     console.log(`🚀 Server running on port ${port}`);
   });

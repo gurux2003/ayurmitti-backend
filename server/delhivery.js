@@ -1,11 +1,18 @@
 import axios from 'axios';
 
-const DELHIVERY_BASE_URL = process.env.DELHIVERY_BASE_URL || 'https://track.delhivery.com';
+const DELHIVERY_BASE_URL = process.env.DELHIVERY_BASE_URL || 'https://express.delhivery.com';
 const DELHIVERY_API_KEY = process.env.DELHIVERY_API_KEY;
 
 if (!DELHIVERY_API_KEY) {
   console.warn('⚠️ DELHIVERY_API_KEY is not set. Delivery features will not work.');
 }
+
+const WAREHOUSE_PINCODE = process.env.WAREHOUSE_PINCODE || '332404';
+const WAREHOUSE_NAME    = process.env.WAREHOUSE_NAME    || 'GS Traders';
+const WAREHOUSE_CITY    = process.env.WAREHOUSE_CITY    || 'Reengus';
+const WAREHOUSE_STATE   = process.env.WAREHOUSE_STATE   || 'Rajasthan';
+const WAREHOUSE_ADDRESS = process.env.WAREHOUSE_ADDRESS || 'SHAHID MAGAN SINGH COLONY, WARD NO-15, Mahroli';
+const WAREHOUSE_PHONE   = process.env.WAREHOUSE_PHONE   || '9636910582';
 
 const getDelhiveryClient = () => {
   return axios.create({
@@ -15,7 +22,7 @@ const getDelhiveryClient = () => {
       'Content-Type': 'application/json',
       'Accept': 'application/json'
     },
-    timeout: 10000
+    timeout: 15000
   });
 };
 
@@ -25,21 +32,6 @@ export const checkDeliveryAvailability = async (pincode) => {
       throw new Error('Delhivery API key not configured');
     }
 
-    const isStaging = DELHIVERY_BASE_URL.includes('staging');
-
-    if (isStaging) {
-      const isValid = /^[1-9][0-9]{5}$/.test(pincode);
-      return {
-        available: isValid,
-        pincode,
-        city: '',
-        state: '',
-        deliveryTime: '3-5 business days',
-        note: 'Staging mode — pincode lookup bypassed'
-      };
-    }
-
-    // Production pincode lookup
     const client = getDelhiveryClient();
     const response = await client.get(
       `/api/pin-codes/json/?filter={"postal_code":"${pincode}"}`
@@ -67,7 +59,7 @@ export const checkDeliveryAvailability = async (pincode) => {
   }
 };
 
-export const calculateDeliveryCharges = async ({ weight, pincode, origin_pincode = '302001' }) => {
+export const calculateDeliveryCharges = async ({ weight, pincode, origin_pincode = WAREHOUSE_PINCODE }) => {
   try {
     if (!DELHIVERY_API_KEY) {
       throw new Error('Delhivery API key not configured');
@@ -76,20 +68,25 @@ export const calculateDeliveryCharges = async ({ weight, pincode, origin_pincode
     const WEIGHT_SLAB = weight <= 0.5 ? 'light' : weight <= 2 ? 'medium' : 'heavy';
 
     const chargesMap = {
-      light: { local: 30, metro: 40, national: 80 },
+      light:  { local: 30, metro: 40, national: 80  },
       medium: { local: 50, metro: 70, national: 120 },
-      heavy: { local: 80, metro: 110, national: 180 }
+      heavy:  { local: 80, metro: 110, national: 180 }
     };
 
     let zone = 'national';
     const metroPin = ['400', '110', '201', '302'];
     if (metroPin.some(p => pincode.startsWith(p))) {
       zone = 'metro';
-    } else if (Math.abs(parseInt(pincode.substring(0, 3)) - parseInt(origin_pincode.substring(0, 3))) < 50) {
+    } else if (
+      Math.abs(
+        parseInt(pincode.substring(0, 3)) - parseInt(origin_pincode.substring(0, 3))
+      ) < 50
+    ) {
       zone = 'local';
     }
 
     const charges = chargesMap[WEIGHT_SLAB][zone];
+    const gst = Math.round(charges * 0.05 * 100) / 100;
 
     return {
       success: true,
@@ -98,8 +95,8 @@ export const calculateDeliveryCharges = async ({ weight, pincode, origin_pincode
       zone,
       slab: WEIGHT_SLAB,
       currency: 'INR',
-      gst: Math.round(charges * 0.05 * 100) / 100,
-      total: charges + Math.round(charges * 0.05 * 100) / 100
+      gst,
+      total: charges + gst
     };
   } catch (error) {
     console.error('❌ Delhivery charge calculation failed:', error.message);
@@ -113,7 +110,10 @@ export const createShipment = async (shipmentData) => {
       throw new Error('Delhivery API key not configured');
     }
 
-    const requiredFields = ['order_id', 'customer_name', 'customer_phone', 'destination_pincode', 'destination_address'];
+    const requiredFields = [
+      'order_id', 'customer_name', 'customer_phone',
+      'destination_pincode', 'destination_address'
+    ];
     for (const field of requiredFields) {
       if (!shipmentData[field]) {
         throw new Error(`Missing required field: ${field}`);
@@ -134,19 +134,21 @@ export const createShipment = async (shipmentData) => {
           phone: shipmentData.customer_phone,
           order: shipmentData.order_id,
           payment_mode: shipmentData.payment_mode || 'Prepaid',
-          return_pin: process.env.WAREHOUSE_PINCODE || '302001',
-          return_city: process.env.WAREHOUSE_CITY || 'Jaipur',
-          return_phone: process.env.WAREHOUSE_PHONE || '9876543210',
-          return_add: process.env.WAREHOUSE_ADDRESS || '123 Main Street',
-          return_state: process.env.WAREHOUSE_STATE || 'Rajasthan',
+          return_pin: WAREHOUSE_PINCODE,
+          return_city: WAREHOUSE_CITY,
+          return_phone: WAREHOUSE_PHONE,
+          return_add: WAREHOUSE_ADDRESS,
+          return_state: WAREHOUSE_STATE,
           return_country: 'India',
           products_desc: shipmentData.product_description || 'Ayurvedic Products',
           hsn_code: '',
-          cod_amount: shipmentData.payment_mode === 'COD' ? String(shipmentData.total_amount) : '0',
+          cod_amount: shipmentData.payment_mode === 'COD'
+            ? String(shipmentData.total_amount)
+            : '0',
           order_date: new Date().toISOString().split('T')[0],
           total_amount: String(shipmentData.total_amount || 0),
-          seller_add: process.env.WAREHOUSE_ADDRESS || '123 Main Street',
-          seller_name: 'Ayurmitti',
+          seller_add: WAREHOUSE_ADDRESS,
+          seller_name: WAREHOUSE_NAME,
           seller_inv: shipmentData.order_id,
           quantity: '1',
           waybill: '',
@@ -159,7 +161,7 @@ export const createShipment = async (shipmentData) => {
         }
       ],
       pickup_location: {
-        name: process.env.WAREHOUSE_NAME || 'Ayurmitti'
+        name: WAREHOUSE_NAME
       }
     });
 
@@ -241,7 +243,8 @@ export const cancelShipment = async (waybill) => {
     }
 
     const client = getDelhiveryClient();
-    const response = await client.post('/api/p/edit',
+    const response = await client.post(
+      '/api/p/edit',
       `waybill=${waybill}&cancellation=true`,
       {
         headers: {

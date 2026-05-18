@@ -21,7 +21,12 @@ if (fs.existsSync(serverEnvPath)) dotenv.config({ path: serverEnvPath, override:
 
 const app = express();
 const port = process.env.PORT || 8080;
-app.use(express.json());
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
+  next();
+});
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ================= FILE FALLBACK =================
 const DATA_DIR = path.resolve(__dirname, "data");

@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const DELHIVERY_BASE_URL = process.env.DELHIVERY_BASE_URL || 'https://express.delhivery.com';
+const DELHIVERY_BASE_URL = process.env.DELHIVERY_BASE_URL || 'https://track.delhivery.com';
 const DELHIVERY_API_KEY = process.env.DELHIVERY_API_KEY;
 
 if (!DELHIVERY_API_KEY) {
@@ -8,7 +8,7 @@ if (!DELHIVERY_API_KEY) {
 }
 
 const WAREHOUSE_PINCODE = process.env.WAREHOUSE_PINCODE || '332404';
-const WAREHOUSE_NAME    = process.env.WAREHOUSE_NAME    || 'GS Traders';
+const WAREHOUSE_NAME    = process.env.WAREHOUSE_NAME    || 'G S TRADERS';
 const WAREHOUSE_CITY    = process.env.WAREHOUSE_CITY    || 'Reengus';
 const WAREHOUSE_STATE   = process.env.WAREHOUSE_STATE   || 'Rajasthan';
 const WAREHOUSE_ADDRESS = process.env.WAREHOUSE_ADDRESS || 'SHAHID MAGAN SINGH COLONY, WARD NO-15, Mahroli';
@@ -32,26 +32,14 @@ export const checkDeliveryAvailability = async (pincode) => {
       throw new Error('Delhivery API key not configured');
     }
 
-    const client = getDelhiveryClient();
-    const response = await client.get(
-      `/api/pin-codes/json/?filter={"postal_code":"${pincode}"}`
-    );
-
-    if (response.data?.data?.length > 0) {
-      const pinData = response.data.data[0];
-      return {
-        available: true,
-        pincode,
-        city: pinData.city || '',
-        state: pinData.state || '',
-        deliveryTime: pinData.Deliver_by_days || '3-5 business days'
-      };
-    }
-
+    // Delhivery pincode API ignores filter parameter — validate format only
+    const isValid = /^[1-9][0-9]{5}$/.test(pincode);
     return {
-      available: false,
+      available: isValid,
       pincode,
-      message: 'Delivery not available in this area'
+      city: '',
+      state: '',
+      deliveryTime: '3-5 business days'
     };
   } catch (error) {
     console.error('❌ Delhivery availability check failed:', error.message);
@@ -166,6 +154,8 @@ export const createShipment = async (shipmentData) => {
     });
 
     const formData = `format=json&data=${encodeURIComponent(shipmentPayload)}`;
+
+    console.log('🚚 Creating shipment for order:', shipmentData.order_id);
 
     const response = await client.post('/api/cmu/create.json', formData, {
       headers: {
